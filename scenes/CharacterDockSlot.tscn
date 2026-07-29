@@ -1,0 +1,29 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/CharacterDockSlot.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/CharacterPortrait.tscn" id="2"]
+
+[node name="CharacterDockSlot" type="Control"]
+custom_minimum_size = Vector2(90, 122)
+script = ExtResource("1")
+
+[node name="Portrait" parent="." instance=ExtResource("2")]
+position = Vector2(45, 60)
+scale = Vector2(1.05, 1.05)
+
+[node name="ArrowLeft" type="Polygon2D" parent="."]
+color = Color(1, 1, 1, 0.85)
+polygon = PackedVector2Array(14, 45, 4, 55, 14, 65)
+
+[node name="ArrowRight" type="Polygon2D" parent="."]
+color = Color(1, 1, 1, 0.85)
+polygon = PackedVector2Array(76, 45, 86, 55, 76, 65)
+
+[node name="HotkeyHint" type="Label" parent="."]
+offset_top = 100.0
+offset_right = 90.0
+offset_bottom = 120.0
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.7, 0.72, 0.8, 0.85)
+horizontal_alignment = 1
+text = "A/D — сменить"

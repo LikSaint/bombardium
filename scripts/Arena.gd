@@ -1,0 +1,199 @@
+extends Node2D
+## Owns grid state and renders the arena. Blocking is resolved logically
+## (dictionary lookups), not via physics — movement is grid-based, not free.
+
+const BlockScene := preload("res://scenes/Block.tscn")
+const TempWallScene := preload("res://scenes/TempWall.tscn")
+const PowerupScene := preload("res://scenes/Powerup.tscn")
+const WALL_TEXTURE := preload("res://assets/props/wall.png")
+
+enum CellState { EMPTY, WALL, BLOCK }
+
+const BLOCK_DENSITY := 0.6
+const POWERUP_DROP_CHANCE := 0.35
+const FLOOR_COLOR := Color(0.22, 0.24, 0.2)
+# Temp walls reuse the destructible block sprite, lightly tinted with the
+# placing player's color so it reads as "theirs" without a dedicated asset.
+const TEMP_WALL_OWNER_TINT_STRENGTH := 0.35
+
+var cells: Dictionary = {} # Vector2i -> CellState
+var blocks_by_cell: Dictionary = {} # Vector2i -> Block node
+var bombs_by_cell: Dictionary = {} # Vector2i -> Bomb node
+var powerups_by_cell: Dictionary = {} # Vector2i -> Powerup node
+var temp_wall_cells: Dictionary = {} # Vector2i -> owner Player node; WALL cells that are a temp wall (not permanent stone), passable only for their owner
+var temp_wall_nodes: Dictionary = {} # Vector2i -> TempWall node; lets an explosion free the node early instead of waiting out its timer
+
+func generate() -> void:
+	for child in get_children():
+		child.queue_free()
+	cells.clear()
+	blocks_by_cell.clear()
+	bombs_by_cell.clear()
+	powerups_by_cell.clear()
+	temp_wall_cells.clear()
+	temp_wall_nodes.clear()
+
+	for x in Consts.GRID_WIDTH:
+		for y in Consts.GRID_HEIGHT:
+			var cell := Vector2i(x, y)
+			if x == 0 or y == 0 or x == Consts.GRID_WIDTH - 1 or y == Consts.GRID_HEIGHT - 1:
+				cells[cell] = CellState.WALL
+			elif x % 2 == 0 and y % 2 == 0:
+				cells[cell] = CellState.WALL
+			else:
+				cells[cell] = CellState.EMPTY
+
+	var protected_cells := _get_protected_cells()
+	for cell in cells.keys():
+		if cells[cell] != CellState.EMPTY:
+			continue
+		if protected_cells.has(cell):
+			continue
+		if randf() < BLOCK_DENSITY:
+			_place_block(cell)
+
+	queue_redraw()
+
+func _get_protected_cells() -> Array:
+	var protected: Array = []
+	for spawn in get_spawn_cells():
+		protected.append(spawn)
+		for dir in Consts.DIRECTIONS:
+			protected.append(spawn + dir)
+	return protected
+
+func get_spawn_cells() -> Array:
+	return [
+		Vector2i(1, 1),
+		Vector2i(Consts.GRID_WIDTH - 2, 1),
+		Vector2i(1, Consts.GRID_HEIGHT - 2),
+		Vector2i(Consts.GRID_WIDTH - 2, Consts.GRID_HEIGHT - 2),
+	]
+
+func _place_block(cell: Vector2i) -> void:
+	var block := BlockScene.instantiate()
+	block.position = cell_to_world(cell)
+	add_child(block)
+	blocks_by_cell[cell] = block
+	cells[cell] = CellState.BLOCK
+
+func destroy_block_at(cell: Vector2i) -> void:
+	if not blocks_by_cell.has(cell):
+		return
+	blocks_by_cell[cell].destroy()
+	blocks_by_cell.erase(cell)
+	cells[cell] = CellState.EMPTY
+	if randf() < POWERUP_DROP_CHANCE:
+		_spawn_powerup(cell)
+
+func _spawn_powerup(cell: Vector2i) -> void:
+	var powerup := PowerupScene.instantiate()
+	powerup.type = randi() % 4
+	powerup.position = cell_to_world(cell)
+	add_child(powerup)
+	powerups_by_cell[cell] = powerup
+
+func has_powerup_at(cell: Vector2i) -> bool:
+	return powerups_by_cell.has(cell)
+
+# Explosions never destroy powerups lying on the ground — only players collect them.
+func try_collect_powerup(cell: Vector2i, player: Node) -> void:
+	if not powerups_by_cell.has(cell):
+		return
+	var type: int = powerups_by_cell[cell].type
+	powerups_by_cell[cell].queue_free()
+	powerups_by_cell.erase(cell)
+	player.apply_powerup(type)
+
+func place_temp_wall(cell: Vector2i, owner: Node = null) -> Node:
+	if get_cell_state(cell) != CellState.EMPTY or bombs_by_cell.has(cell):
+		return null
+	var wall := TempWallScene.instantiate()
+	wall.position = cell_to_world(cell)
+	wall.cell = cell
+	wall.arena = self
+	add_child(wall)
+	cells[cell] = CellState.WALL
+	temp_wall_cells[cell] = owner
+	temp_wall_nodes[cell] = wall
+	if owner != null:
+		wall.modulate = Color.WHITE.lerp(Consts.PLAYER_COLORS[(owner.player_id - 1) % Consts.PLAYER_COLORS.size()], TEMP_WALL_OWNER_TINT_STRENGTH)
+	queue_redraw()
+	return wall
+
+func remove_temp_wall(cell: Vector2i) -> void:
+	if cells.get(cell) == CellState.WALL:
+		cells[cell] = CellState.EMPTY
+		temp_wall_cells.erase(cell)
+		temp_wall_nodes.erase(cell)
+		queue_redraw()
+
+func is_temp_wall(cell: Vector2i) -> bool:
+	return temp_wall_cells.has(cell)
+
+# Lets an explosion kill a temp wall immediately (see Bomb._explode_cross/
+# _explode_circle) instead of leaving its sprite up until its own timer fires.
+func destroy_temp_wall_at(cell: Vector2i) -> void:
+	if temp_wall_nodes.has(cell):
+		temp_wall_nodes[cell].destroy()
+
+func in_bounds(cell: Vector2i) -> bool:
+	return cell.x >= 0 and cell.x < Consts.GRID_WIDTH and cell.y >= 0 and cell.y < Consts.GRID_HEIGHT
+
+func get_cell_state(cell: Vector2i) -> int:
+	if not in_bounds(cell):
+		return CellState.WALL
+	return cells.get(cell, CellState.EMPTY)
+
+func is_wall(cell: Vector2i) -> bool:
+	return get_cell_state(cell) == CellState.WALL
+
+func is_block(cell: Vector2i) -> bool:
+	return get_cell_state(cell) == CellState.BLOCK
+
+func is_walkable(cell: Vector2i) -> bool:
+	if get_cell_state(cell) != CellState.EMPTY:
+		return false
+	if bombs_by_cell.has(cell):
+		return false
+	return true
+
+# Same as is_walkable(), except a temp wall is passable for the player who
+# placed it (everyone else, bombs, and explosions still treat it as solid).
+func is_walkable_for(cell: Vector2i, player: Node) -> bool:
+	if get_cell_state(cell) == CellState.WALL and temp_wall_cells.get(cell) == player:
+		return not bombs_by_cell.has(cell)
+	return is_walkable(cell)
+
+func register_bomb(cell: Vector2i, bomb: Node) -> void:
+	bombs_by_cell[cell] = bomb
+
+func remove_bomb(cell: Vector2i) -> void:
+	bombs_by_cell.erase(cell)
+
+func has_bomb_at(cell: Vector2i) -> bool:
+	return bombs_by_cell.has(cell)
+
+func get_bomb_at(cell: Vector2i) -> Node:
+	return bombs_by_cell.get(cell)
+
+func cell_to_world(cell: Vector2i) -> Vector2:
+	return Vector2(
+		cell.x * Consts.CELL_SIZE + Consts.CELL_SIZE / 2.0,
+		cell.y * Consts.CELL_SIZE + Consts.CELL_SIZE / 2.0
+	)
+
+func world_to_cell(pos: Vector2) -> Vector2i:
+	return Vector2i(int(pos.x / Consts.CELL_SIZE), int(pos.y / Consts.CELL_SIZE))
+
+func _draw() -> void:
+	for x in Consts.GRID_WIDTH:
+		for y in Consts.GRID_HEIGHT:
+			var cell := Vector2i(x, y)
+			var rect := Rect2(x * Consts.CELL_SIZE, y * Consts.CELL_SIZE, Consts.CELL_SIZE, Consts.CELL_SIZE)
+			var state = cells.get(cell, CellState.EMPTY)
+			if state == CellState.WALL and not temp_wall_cells.has(cell):
+				draw_texture_rect(WALL_TEXTURE, rect, false)
+			else:
+				draw_rect(rect, FLOOR_COLOR, true)
+				draw_rect(rect, Color(0, 0, 0, 0.15), false, 1.0)

@@ -1,0 +1,104 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/Arena.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/PlayerHudCorner.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/PauseMenu.tscn" id="4"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Arena" parent="." instance=ExtResource("2")]
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(416, 352)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Overlay" type="ColorRect" parent="UI"]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.75)
+
+[node name="ResultsLabel" type="Label" parent="UI/Overlay"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="RoundTimerLabel" type="Label" parent="UI/Overlay"]
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_right = 200.0
+offset_top = -90.0
+offset_bottom = -50.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 1)
+horizontal_alignment = 1
+
+[node name="HotkeyHint" type="Label" parent="UI"]
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -300.0
+offset_right = 300.0
+offset_top = 8.0
+offset_bottom = 46.0
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 0.85)
+horizontal_alignment = 1
+text = "Движение — WASD / стик   •   Бомба — Space / A   •   Способность — E / B
+Пауза — Esc / Start"
+
+[node name="Dock" type="HBoxContainer" parent="UI"]
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = -320.0
+offset_right = 320.0
+offset_top = -120.0
+offset_bottom = -10.0
+alignment = 1
+
+[node name="HudTopLeft" parent="UI" instance=ExtResource("3")]
+offset_left = 12.0
+offset_top = 12.0
+offset_right = 222.0
+offset_bottom = 108.0
+
+[node name="HudTopRight" parent="UI" instance=ExtResource("3")]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -222.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 108.0
+mirrored = true
+
+[node name="HudBottomLeft" parent="UI" instance=ExtResource("3")]
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -108.0
+offset_right = 222.0
+offset_bottom = -12.0
+
+[node name="HudBottomRight" parent="UI" instance=ExtResource("3")]
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = -222.0
+offset_top = -108.0
+offset_right = -12.0
+offset_bottom = -12.0
+mirrored = true
+
+[node name="PauseMenu" parent="." instance=ExtResource("4")]
+include_lobby_restart = true

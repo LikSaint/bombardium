@@ -1,0 +1,94 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/PlayerHudCorner.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/CharacterPortrait.tscn" id="2"]
+
+[node name="PlayerHudCorner" type="Control"]
+custom_minimum_size = Vector2(210, 96)
+visible = false
+script = ExtResource("1")
+
+[node name="Portrait" parent="." instance=ExtResource("2")]
+position = Vector2(36, 46)
+scale = Vector2(0.9, 0.9)
+
+[node name="Stats" type="GridContainer" parent="."]
+offset_left = 78.0
+offset_top = 6.0
+offset_right = 210.0
+offset_bottom = 90.0
+columns = 2
+
+[node name="Bomb" type="HBoxContainer" parent="Stats"]
+
+[node name="Icon" type="TextureRect" parent="Stats/Bomb"]
+custom_minimum_size = Vector2(22, 22)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Count" type="Label" parent="Stats/Bomb"]
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+vertical_alignment = 1
+text = "0"
+
+[node name="Radius" type="HBoxContainer" parent="Stats"]
+
+[node name="Icon" type="TextureRect" parent="Stats/Radius"]
+custom_minimum_size = Vector2(22, 22)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Count" type="Label" parent="Stats/Radius"]
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+vertical_alignment = 1
+text = "0"
+
+[node name="Speed" type="HBoxContainer" parent="Stats"]
+
+[node name="Icon" type="TextureRect" parent="Stats/Speed"]
+custom_minimum_size = Vector2(22, 22)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Count" type="Label" parent="Stats/Speed"]
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+vertical_alignment = 1
+text = "0"
+
+[node name="Shield" type="HBoxContainer" parent="Stats"]
+
+[node name="Icon" type="TextureRect" parent="Stats/Shield"]
+custom_minimum_size = Vector2(22, 22)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Count" type="Label" parent="Stats/Shield"]
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+vertical_alignment = 1
+text = "0"
+
+[node name="ArrowLeft" type="Polygon2D" parent="."]
+visible = false
+position = Vector2(15, 46)
+color = Color(1, 1, 1, 0.85)
+polygon = PackedVector2Array(4, -1, -6, 9, 4, 19)
+
+[node name="ArrowRight" type="Polygon2D" parent="."]
+visible = false
+position = Vector2(57, 46)
+color = Color(1, 1, 1, 0.85)
+polygon = PackedVector2Array(-4, -1, 6, 9, -4, 19)
+
+[node name="HotkeyHint" type="Label" parent="."]
+visible = false
+offset_top = 68.0
+offset_right = 210.0
+offset_bottom = 85.0
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.7, 0.72, 0.8, 0.85)
+horizontal_alignment = 1
+text = "A/D — сменить"
