@@ -22,10 +22,14 @@ var is_disconnected: bool = false
 var can_change_character: bool = false
 const CHARACTER_CHANGE_DELAY := 0.5
 
+var _portrait_rest_pos: Vector2
+var _bounce_tween: Tween
+
 func _ready() -> void:
 	if mirrored:
 		_apply_mirror()
 	_setup_arrow_animations()
+	_portrait_rest_pos = $Portrait.position
 	Loc.language_changed.connect(_on_language_changed)
 
 func _on_language_changed() -> void:
@@ -132,12 +136,17 @@ func _start_arrow_blink() -> void:
 const BOUNCE_DISTANCE := 8.0
 const BOUNCE_DURATION := 0.25
 
+## Always bounces relative to the fixed rest position captured at _ready(),
+## never the portrait's current (possibly still mid-tween) position - reading
+## the live position here let repeated quick presses re-anchor "rest" higher
+## and higher each time, walking the portrait off-screen.
 func _play_bounce_animation() -> void:
-	var rest: Vector2 = $Portrait.position
-	var up: Vector2 = rest - Vector2(0, BOUNCE_DISTANCE)
-	var tw := create_tween()
-	tw.tween_property($Portrait, "position", up, BOUNCE_DURATION * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property($Portrait, "position", rest, BOUNCE_DURATION * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if _bounce_tween != null and _bounce_tween.is_valid():
+		_bounce_tween.kill()
+	var up: Vector2 = _portrait_rest_pos - Vector2(0, BOUNCE_DISTANCE)
+	_bounce_tween = create_tween()
+	_bounce_tween.tween_property($Portrait, "position", up, BOUNCE_DURATION * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_bounce_tween.tween_property($Portrait, "position", _portrait_rest_pos, BOUNCE_DURATION * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 func _refresh_hint() -> void:
 	if is_disconnected:
