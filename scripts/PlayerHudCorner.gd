@@ -26,6 +26,12 @@ func _ready() -> void:
 	if mirrored:
 		_apply_mirror()
 	_setup_arrow_animations()
+	Loc.language_changed.connect(_on_language_changed)
+
+func _on_language_changed() -> void:
+	if offline_label != null:
+		offline_label.text = Loc.t("OFFLINE_BADGE")
+	_refresh_hint()
 
 func _apply_mirror() -> void:
 	var w: float = custom_minimum_size.x
@@ -68,7 +74,7 @@ func _ensure_offline_label() -> void:
 	if offline_label != null:
 		return
 	offline_label = Label.new()
-	offline_label.text = "ОТКЛЮЧЕН"
+	offline_label.text = Loc.t("OFFLINE_BADGE")
 	offline_label.add_theme_font_size_override("font_size", 12)
 	offline_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
 	var badge_x: float = (custom_minimum_size.x - 72.0) if mirrored else 0.0
@@ -135,9 +141,9 @@ func _play_bounce_animation() -> void:
 
 func _refresh_hint() -> void:
 	if is_disconnected:
-		$HotkeyHint.text = "Отключено…"
+		$HotkeyHint.text = Loc.t("DISCONNECTED_HINT")
 	else:
-		$HotkeyHint.text = "A/D — сменить" if device_id == -1 else "◄► — сменить"
+		$HotkeyHint.text = Loc.t("CYCLE_HINT", [Hints.label(device_id, Hints.Action.CYCLE)])
 
 func _input(event: InputEvent) -> void:
 	if player == null or player.alive:
@@ -157,7 +163,7 @@ func _input(event: InputEvent) -> void:
 				dir = 1
 	if dir == 0 or is_disconnected or not can_change_character:
 		return
-	character_id = posmod(character_id + dir, Consts.CHARACTER_NAMES.size())
+	character_id = posmod(character_id + dir, Consts.CHARACTER_COUNT)
 	GameManager.set_character_id(player.player_id, character_id)
 	$Portrait.set_character(character_id, Consts.PLAYER_COLORS[(player.player_id - 1) % Consts.PLAYER_COLORS.size()])
 	_play_bounce_animation()

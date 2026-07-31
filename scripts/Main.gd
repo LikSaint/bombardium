@@ -25,7 +25,12 @@ func _ready() -> void:
 	_fit_camera_to_arena()
 	GameManager.round_ended.connect(_on_round_ended)
 	_spawn_players()
+	_refresh_hotkey_hint()
+	Loc.language_changed.connect(_refresh_hotkey_hint)
 	_show_hotkey_hint()
+
+func _refresh_hotkey_hint() -> void:
+	hotkey_hint.text = Loc.t("MAIN_HOTKEY_HINT")
 
 func _show_hotkey_hint() -> void:
 	hotkey_hint.modulate.a = 1.0
@@ -64,25 +69,25 @@ func _on_round_ended(winner_id: int) -> void:
 	var lines: PackedStringArray = []
 
 	if match_over:
-		lines.append("Матч завершён!")
-		lines.append("Победитель матча: Player %d" % GameManager.get_match_winner())
+		lines.append(Loc.t("MATCH_OVER"))
+		lines.append(Loc.t("MATCH_WINNER", [GameManager.get_match_winner()]))
 	elif winner_id == -1:
-		lines.append("Раунд %d/%d: ничья" % [GameManager.round_number, GameManager.ROUNDS_PER_MATCH])
+		lines.append(Loc.t("ROUND_DRAW", [GameManager.round_number, GameManager.ROUNDS_PER_MATCH]))
 	else:
-		lines.append("Раунд %d/%d: победил Player %d" % [GameManager.round_number, GameManager.ROUNDS_PER_MATCH, winner_id])
+		lines.append(Loc.t("ROUND_WINNER", [GameManager.round_number, GameManager.ROUNDS_PER_MATCH, winner_id]))
 
 	lines.append("")
-	lines.append("Счёт:")
+	lines.append(Loc.t("SCORE_HEADER"))
 	var ids: Array = GameManager.scores.keys()
 	ids.sort()
 	for id in ids:
-		lines.append("Player %d — %d" % [id, GameManager.scores[id]])
+		lines.append(Loc.t("SCORE_LINE", [id, GameManager.scores[id]]))
 
 	results_label.text = "\n".join(lines)
 	overlay.visible = true
 
 	for seconds_left in range(ROUND_END_DELAY_SECONDS, 0, -1):
-		round_timer_label.text = "Следующий раунд через: %d" % seconds_left
+		round_timer_label.text = Loc.t("NEXT_ROUND_IN", [seconds_left])
 		await get_tree().create_timer(1.0).timeout
 
 	if match_over:

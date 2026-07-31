@@ -7,13 +7,16 @@ const DEVICE_NONE := -2 # sentinel: slot's controller disconnected, nobody bound
 const DEVICE_BOT := -3 # sentinel: slot is AI-controlled, no physical device
 
 const MAP_SIZES := [
-	{"name": "Крошечная", "width": 9, "height": 7},
-	{"name": "Маленькая", "width": 11, "height": 9},
-	{"name": "Средняя", "width": 13, "height": 11},
-	{"name": "Большая", "width": 17, "height": 13},
-	{"name": "Огромная", "width": 21, "height": 17},
+	{"name_key": "MAP_SIZE_TINY", "width": 9, "height": 7},
+	{"name_key": "MAP_SIZE_SMALL", "width": 11, "height": 9},
+	{"name_key": "MAP_SIZE_MEDIUM", "width": 13, "height": 11},
+	{"name_key": "MAP_SIZE_LARGE", "width": 17, "height": 13},
+	{"name_key": "MAP_SIZE_HUGE", "width": 21, "height": 17},
 ]
 const DEFAULT_MAP_SIZE_INDEX := 2
+
+func map_size_name(index: int) -> String:
+	return Loc.t(MAP_SIZES[index]["name_key"])
 
 var map_size_index: int = DEFAULT_MAP_SIZE_INDEX
 var GRID_WIDTH: int = MAP_SIZES[DEFAULT_MAP_SIZE_INDEX]["width"]
@@ -41,17 +44,41 @@ const PLAYER_COLORS := [
 # 4-directional PixelLab sprite (single flat image per direction, not a
 # tintable-layer setup) — team color is applied as a soft whole-sprite
 # modulate blend in CharacterPortrait.gd rather than a clothes-only tint.
-const CHARACTER_NAMES := ["Сапёр", "Бегун", "Инженер", "Пиро", "Хокеист"]
+const CHARACTER_COUNT := 5
+
+const CHARACTER_NAME_KEYS := [
+	"CHAR_NAME_BOMB_MASTER",
+	"CHAR_NAME_SCOUT",
+	"CHAR_NAME_ENGINEER",
+	"CHAR_NAME_PYRO",
+	"CHAR_NAME_BOMB_KICKER",
+]
+
+func character_name(character_id: int) -> String:
+	return Loc.t(CHARACTER_NAME_KEYS[character_id])
+
+# Player.CharacterId.ENGINEER — the only ability blurb that names a button.
+const ENGINEER_ID := 2
 
 # Short ability/passive blurb shown on character select. Index matches
-# CHARACTER_NAMES / Player.CharacterId order.
-const CHARACTER_ABILITY_DESC := [
-	"Разбирается в бомбах",
-	"Двойное нажатие в сторону ящика или бомбы - перепрыгивает через неё",
-	"E: Поставить стену, через которую проходит только сам",
-	"Бомбы взрываются кругом и немного пробивают ящики",
-	"Толкает бомбы движением — свои и чужие",
+# CHARACTER_NAME_KEYS / Player.CharacterId order.
+const CHARACTER_ABILITY_DESC_KEYS := [
+	"CHAR_DESC_BOMB_MASTER",
+	"CHAR_DESC_SCOUT",
+	"CHAR_DESC_ENGINEER",
+	"CHAR_DESC_PYRO",
+	"CHAR_DESC_BOMB_KICKER",
 ]
+
+## `device_id` selects which button label gets substituted into the
+## Engineer's blurb (keyboard letter vs. that player's actual gamepad glyph);
+## every other character's blurb ignores it.
+func character_ability_desc(character_id: int, device_id: int = -1) -> String:
+	var text := Loc.t(CHARACTER_ABILITY_DESC_KEYS[character_id])
+	if character_id == ENGINEER_ID:
+		var button := Hints.label(device_id, Hints.Action.ABILITY)
+		text = text % [button if button != "" else "—"]
+	return text
 const CHARACTER_SPRITES := [
 	{
 		"south": preload("res://assets/characters/bomb_master_south.png"),

@@ -19,12 +19,23 @@ var slots: Array[Dictionary] = [] # {device, player_id, character_id, ready}
 @onready var bar_nodes: Array = [
 	$MapSizeRow/Bar0, $MapSizeRow/Bar1, $MapSizeRow/Bar2, $MapSizeRow/Bar3, $MapSizeRow/Bar4
 ]
+@onready var hotkey_legend: Label = $HotkeyLegend
 
 func _ready() -> void:
 	Consts.set_map_size(Consts.DEFAULT_MAP_SIZE_INDEX)
 	_refresh_map_size_bars()
 	_refresh_slots_ui()
+	_refresh_legend()
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
+	Loc.language_changed.connect(_on_language_changed)
+
+func _on_language_changed() -> void:
+	_refresh_legend()
+	_refresh_slots_ui()
+
+func _refresh_legend() -> void:
+	var join_combo := "%s / %s" % [Hints.KEYBOARD_LABELS[Hints.Action.JOIN], Hints.XBOX_STYLE_LABELS[Hints.Action.JOIN]]
+	hotkey_legend.text = Loc.t("LOBBY_LEGEND", [join_combo, Hints.KEYBOARD_LABELS[Hints.Action.CYCLE], Hints.XBOX_STYLE_LABELS[Hints.Action.CYCLE]])
 
 # Nothing persists pre-match, so a dropped controller's slot just closes
 # outright (freeing it for anyone to re-join) instead of trying to hold a
@@ -118,7 +129,7 @@ func _append_bot_slot() -> void:
 	slots.append({
 		"device": Consts.DEVICE_BOT,
 		"player_id": slots.size() + 1,
-		"character_id": randi() % Consts.CHARACTER_NAMES.size(),
+		"character_id": randi() % Consts.CHARACTER_COUNT,
 		"ready": true,
 	})
 
@@ -138,7 +149,7 @@ func _cycle_character(device: int, delta: int) -> void:
 	var slot := _find_slot_by_device(device)
 	if slot.is_empty() or slot["ready"]:
 		return
-	slot["character_id"] = posmod(slot["character_id"] + delta, Consts.CHARACTER_NAMES.size())
+	slot["character_id"] = posmod(slot["character_id"] + delta, Consts.CHARACTER_COUNT)
 	_refresh_slots_ui()
 
 func _maybe_start() -> void:
@@ -177,6 +188,6 @@ func _refresh_slots_ui() -> void:
 		var node: Control = slot_nodes[i]
 		if i < slots.size():
 			var slot: Dictionary = slots[i]
-			node.show_joined(i, slot["character_id"], slot["ready"], slot["device"] == Consts.DEVICE_BOT)
+			node.show_joined(i, slot["character_id"], slot["ready"], slot["device"] == Consts.DEVICE_BOT, slot["device"])
 		else:
 			node.show_empty()

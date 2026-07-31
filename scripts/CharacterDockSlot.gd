@@ -16,6 +16,7 @@ var is_disconnected: bool = false
 func _ready() -> void:
 	_refresh()
 	_refresh_hint()
+	Loc.language_changed.connect(_refresh_hint)
 	var blink := create_tween().set_loops()
 	blink.tween_property($ArrowLeft, "modulate:a", 0.25, 0.5)
 	blink.parallel().tween_property($ArrowRight, "modulate:a", 0.25, 0.5)
@@ -55,7 +56,7 @@ func _input(event: InputEvent) -> void:
 				dir = 1
 	if dir == 0:
 		return
-	character_id = posmod(character_id + dir, Consts.CHARACTER_NAMES.size())
+	character_id = posmod(character_id + dir, Consts.CHARACTER_COUNT)
 	GameManager.set_character_id(player_id, character_id)
 	_refresh()
 
@@ -64,6 +65,6 @@ func _refresh() -> void:
 
 func _refresh_hint() -> void:
 	if is_disconnected:
-		$HotkeyHint.text = "Отключено…"
+		$HotkeyHint.text = Loc.t("DISCONNECTED_HINT")
 	else:
-		$HotkeyHint.text = "A/D — сменить" if device_id == -1 else "◄► — сменить"
+		$HotkeyHint.text = Loc.t("CYCLE_HINT", [Hints.label(device_id, Hints.Action.CYCLE)])

@@ -11,12 +11,14 @@ config_version=5
 [application]
 
 config/name="Bombardium"
-run/main_scene="res://scenes/Lobby.tscn"
+run/main_scene="res://scenes/MainMenu.tscn"
 config/features=PackedStringArray("4.7")
 
 [autoload]
 
 Consts="*res://scripts/Constants.gd"
+Loc="*res://scripts/Localization.gd"
+Hints="*res://scripts/ControlHints.gd"
 GameManager="*res://scripts/GameManager.gd"
 
 [display]

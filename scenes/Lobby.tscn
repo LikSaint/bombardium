@@ -114,4 +114,4 @@ B — добавить бота   •   N — убрать бота"
 horizontal_alignment = 1
 
 [node name="PauseMenu" parent="." unique_id=1116855701 instance=ExtResource("3")]
-include_lobby_restart = false
+include_restart = false
