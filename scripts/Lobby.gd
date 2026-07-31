@@ -56,10 +56,12 @@ func _input(event: InputEvent) -> void:
 		if event.keycode == KEY_UP:
 			Consts.set_map_size(Consts.map_size_index - 1)
 			_refresh_map_size_bars()
+			Sfx.play("menu_move")
 			return
 		elif event.keycode == KEY_DOWN:
 			Consts.set_map_size(Consts.map_size_index + 1)
 			_refresh_map_size_bars()
+			Sfx.play("menu_move")
 			return
 		elif event.keycode == KEY_B:
 			_add_bot()
@@ -113,8 +115,10 @@ func _toggle_join_or_ready(device: int) -> void:
 		if slots.size() >= Consts.MAX_PLAYERS:
 			return
 		slots.append({"device": device, "player_id": slots.size() + 1, "character_id": 0, "ready": false})
+		Sfx.play("player_join")
 	else:
 		slot["ready"] = not slot["ready"]
+		Sfx.play("menu_confirm" if slot["ready"] else "menu_move")
 	_refresh_slots_ui()
 	_maybe_start()
 
@@ -122,6 +126,7 @@ func _add_bot() -> void:
 	if slots.size() >= Consts.MAX_PLAYERS:
 		return
 	_append_bot_slot()
+	Sfx.play("bot_toggle")
 	_refresh_slots_ui()
 	_maybe_start()
 
@@ -137,6 +142,7 @@ func _remove_last_bot() -> void:
 	for i in range(slots.size() - 1, -1, -1):
 		if slots[i]["device"] == Consts.DEVICE_BOT:
 			slots.remove_at(i)
+			Sfx.play("bot_toggle", 0.8)
 			_reindex_player_ids()
 			_refresh_slots_ui()
 			return
@@ -150,6 +156,7 @@ func _cycle_character(device: int, delta: int) -> void:
 	if slot.is_empty() or slot["ready"]:
 		return
 	slot["character_id"] = posmod(slot["character_id"] + delta, Consts.CHARACTER_COUNT)
+	Sfx.play("menu_move")
 	_refresh_slots_ui()
 
 func _maybe_start() -> void:

@@ -51,6 +51,7 @@ func explode() -> void:
 		return
 	has_exploded = true
 	arena.remove_bomb(cell)
+	Sfx.play("bomb_explode")
 	if is_circle_blast:
 		_explode_circle()
 	else:

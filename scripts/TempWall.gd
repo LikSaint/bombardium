@@ -9,5 +9,6 @@ func _on_timer_timeout() -> void:
 	destroy()
 
 func destroy() -> void:
+	Sfx.play("wall_destroy")
 	arena.remove_temp_wall(cell)
 	queue_free()

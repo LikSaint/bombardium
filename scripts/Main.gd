@@ -71,10 +71,13 @@ func _on_round_ended(winner_id: int) -> void:
 	if match_over:
 		lines.append(Loc.t("MATCH_OVER"))
 		lines.append(Loc.t("MATCH_WINNER", [GameManager.get_match_winner()]))
+		Sfx.play("match_win")
 	elif winner_id == -1:
 		lines.append(Loc.t("ROUND_DRAW", [GameManager.round_number, GameManager.ROUNDS_PER_MATCH]))
+		Sfx.play("round_draw")
 	else:
 		lines.append(Loc.t("ROUND_WINNER", [GameManager.round_number, GameManager.ROUNDS_PER_MATCH, winner_id]))
+		Sfx.play("round_win")
 
 	lines.append("")
 	lines.append(Loc.t("SCORE_HEADER"))
@@ -88,6 +91,7 @@ func _on_round_ended(winner_id: int) -> void:
 
 	for seconds_left in range(ROUND_END_DELAY_SECONDS, 0, -1):
 		round_timer_label.text = Loc.t("NEXT_ROUND_IN", [seconds_left])
+		Sfx.play("countdown_tick")
 		await get_tree().create_timer(1.0).timeout
 
 	if match_over:

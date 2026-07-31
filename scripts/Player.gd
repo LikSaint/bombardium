@@ -203,6 +203,7 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 		return
 	facing_dir = dir
 	$Portrait.face(dir)
+	Sfx.play("jump")
 	_move_to_cell(target_cell, move_duration)
 
 ## Only actually moves once per decision (returns the chosen dir exactly the
@@ -477,9 +478,11 @@ func _try_move(dir: Vector2i) -> void:
 		var bomb = arena.get_bomb_at(target_cell)
 		if bomb != null and not bomb.is_sliding:
 			bomb.start_slide(dir)
+			Sfx.play("bomb_kick")
 			_play_kick_anim()
 	if not arena.is_walkable_for(target_cell, self):
 		return
+	Sfx.play("footstep", 1.0, 0.1)
 	_move_to_cell(target_cell, move_duration)
 
 func place_bomb() -> void:
@@ -495,6 +498,7 @@ func place_bomb() -> void:
 	arena.add_child(bomb)
 	bomb.exploded.connect(_on_owned_bomb_exploded)
 	bomb_count_current -= 1
+	Sfx.play("bomb_place")
 
 func _on_owned_bomb_exploded() -> void:
 	bomb_count_current = min(bomb_count_current + 1, bomb_count_max)
@@ -521,6 +525,7 @@ func _ability_temp_wall() -> bool:
 		return false
 	active_temp_walls.append(wall)
 	wall.tree_exited.connect(func(): active_temp_walls.erase(wall))
+	Sfx.play("wall_place")
 	return true
 
 const KICK_LUNGE_DISTANCE := 16.0
@@ -563,10 +568,12 @@ func die() -> void:
 	if shield_charges > 0:
 		shield_charges -= 1
 		stats_changed.emit()
+		Sfx.play("shield_block")
 		_start_invulnerability()
 		return
 	alive = false
 	visible = false
+	Sfx.play("player_death")
 	GameManager.player_died(player_id)
 	died.emit(player_id)
 

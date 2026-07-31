@@ -19,6 +19,7 @@ config/features=PackedStringArray("4.7")
 Consts="*res://scripts/Constants.gd"
 Loc="*res://scripts/Localization.gd"
 Hints="*res://scripts/ControlHints.gd"
+Sfx="*res://scripts/Sfx.gd"
 GameManager="*res://scripts/GameManager.gd"
 
 [display]

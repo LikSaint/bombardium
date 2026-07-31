@@ -56,7 +56,9 @@ const STRINGS := {
 
 		"SETTINGS_TITLE": "Настройки",
 		"SETTINGS_LANGUAGE": "Язык",
-		"SETTINGS_HINT": "A/D или ◄► — сменить язык   •   Space/Esc — назад",
+		"SETTINGS_SOUND": "Звук",
+		"SETTINGS_OFF": "Выкл",
+		"SETTINGS_HINT": "W/S или ▲▼ — раздел   •   A/D или ◄► — изменить   •   Space/Esc — назад",
 
 		"MENU_PLAY": "Играть",
 		"MENU_QUIT": "Выход",
@@ -101,7 +103,9 @@ const STRINGS := {
 
 		"SETTINGS_TITLE": "Settings",
 		"SETTINGS_LANGUAGE": "Language",
-		"SETTINGS_HINT": "A/D or ◄► — change language   •   Space/Esc — back",
+		"SETTINGS_SOUND": "Sound",
+		"SETTINGS_OFF": "Off",
+		"SETTINGS_HINT": "W/S or ▲▼ — section   •   A/D or ◄► — adjust   •   Space/Esc — back",
 
 		"MENU_PLAY": "Play",
 		"MENU_QUIT": "Quit",
@@ -147,5 +151,6 @@ func _load_saved_language() -> void:
 
 func _save_language() -> void:
 	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS_PATH) # preserve sibling keys (e.g. Sfx's volume) already in the file
 	cfg.set_value("settings", "language", lang)
 	cfg.save(SETTINGS_PATH)

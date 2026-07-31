@@ -103,6 +103,7 @@ func try_collect_powerup(cell: Vector2i, player: Node) -> void:
 	var type: int = powerups_by_cell[cell].type
 	powerups_by_cell[cell].queue_free()
 	powerups_by_cell.erase(cell)
+	Sfx.play("powerup_pickup")
 	player.apply_powerup(type)
 
 func place_temp_wall(cell: Vector2i, owner: Node = null) -> Node:

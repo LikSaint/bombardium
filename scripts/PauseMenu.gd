@@ -19,6 +19,7 @@ var options: Array[String] = []
 var selected: int = 0
 var is_open: bool = false
 var in_settings: bool = false
+var settings_selected: int = 0 # 0 = language row, 1 = sound row
 var pausing_device = null
 
 func _ready() -> void:
@@ -45,8 +46,21 @@ func _refresh_settings_texts() -> void:
 	$SettingsPanel/Title.text = Loc.t("SETTINGS_TITLE")
 	$SettingsPanel/LanguageRow/LanguageLabel.text = Loc.t("SETTINGS_LANGUAGE") + ":"
 	$SettingsPanel/LanguageRow/LanguageValue.text = "%s %s" % [Loc.native_name(), Loc.flag()]
+	$SettingsPanel/SoundRow/SoundLabel.text = Loc.t("SETTINGS_SOUND") + ":"
+	$SettingsPanel/SoundRow/SoundValue.text = _sound_value_text()
+	_refresh_settings_selection()
 	if in_settings:
 		$HotkeyHint.text = Loc.t("SETTINGS_HINT")
+
+func _sound_value_text() -> String:
+	if Sfx.volume <= 0.0:
+		return Loc.t("SETTINGS_OFF")
+	return "%d%%" % Sfx.volume_percent()
+
+func _refresh_settings_selection() -> void:
+	var rows: Array = [$SettingsPanel/LanguageRow, $SettingsPanel/SoundRow]
+	for i in rows.size():
+		rows[i].modulate = Color(1, 1, 1, 1) if i == settings_selected else Color(1, 1, 1, 0.45)
 
 func _on_joy_connection_changed(device: int, connected: bool) -> void:
 	if connected:
@@ -61,6 +75,7 @@ func _input(event: InputEvent) -> void:
 
 	if not is_open:
 		if _is_toggle(event):
+			Sfx.play("menu_confirm", 0.85)
 			_open(device)
 		return
 
@@ -69,20 +84,34 @@ func _input(event: InputEvent) -> void:
 
 	if in_settings:
 		if _is_toggle(event) or _is_confirm(event):
+			Sfx.play("menu_back")
 			_close_settings()
-		elif _is_prev(event) or _is_next(event):
-			Loc.toggle_language()
+		elif _is_row_toggle(event):
+			settings_selected = 1 - settings_selected
+			_refresh_settings_selection()
+			Sfx.play("menu_move")
+		elif _is_value_left(event) or _is_value_right(event):
+			if settings_selected == 0:
+				Loc.toggle_language()
+			else:
+				Sfx.adjust_volume(1 if _is_value_right(event) else -1)
+				_refresh_settings_texts()
+			Sfx.play("menu_move")
 		return
 
 	if _is_toggle(event):
+		Sfx.play("menu_back")
 		_close()
 	elif _is_prev(event):
 		selected = (selected - 1 + options.size()) % options.size()
 		_refresh_selection()
+		Sfx.play("menu_move")
 	elif _is_next(event):
 		selected = (selected + 1) % options.size()
 		_refresh_selection()
+		Sfx.play("menu_move")
 	elif _is_confirm(event):
+		Sfx.play("menu_confirm")
 		_activate(options[selected])
 
 func _device_of(event: InputEvent):
@@ -120,6 +149,31 @@ func _is_confirm(event: InputEvent) -> bool:
 		return true
 	return false
 
+# Settings panel only: W/S (or dpad up/down) switches between the Language
+# and Sound rows; A/D (or dpad left/right) adjusts the selected row's value.
+# Split out from _is_prev/_is_next above, which deliberately treat both axes
+# as one "previous/next" for the single-row option list.
+func _is_row_toggle(event: InputEvent) -> bool:
+	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_W or event.keycode == KEY_S):
+		return true
+	if event is InputEventJoypadButton and event.pressed and (event.button_index == JOY_BUTTON_DPAD_UP or event.button_index == JOY_BUTTON_DPAD_DOWN):
+		return true
+	return false
+
+func _is_value_left(event: InputEvent) -> bool:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
+		return true
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_LEFT:
+		return true
+	return false
+
+func _is_value_right(event: InputEvent) -> bool:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_D:
+		return true
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_RIGHT:
+		return true
+	return false
+
 func _open(device) -> void:
 	pausing_device = device
 	is_open = true
@@ -142,6 +196,7 @@ func _close() -> void:
 
 func _open_settings() -> void:
 	in_settings = true
+	settings_selected = 0
 	$Panel.visible = false
 	$Title.visible = false
 	$SettingsPanel.visible = true
