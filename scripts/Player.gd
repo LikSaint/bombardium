@@ -15,7 +15,7 @@ extends CharacterBody2D
 const BombScene := preload("res://scenes/Bomb.tscn")
 const ExplosionScript := preload("res://scripts/Explosion.gd")
 
-enum CharacterId { BOMB_MASTER, SCOUT, ENGINEER, PYRO, BOMB_KICKER, MAGNET }
+enum CharacterId { BOMB_MASTER, SCOUT, ENGINEER, PYRO, BOMB_KICKER, MAGNET, MINER }
 
 const MOVE_DEADZONE := 0.35
 
@@ -203,6 +203,18 @@ func _apply_character_passives() -> void:
 			bomb_level += 1
 			shield_charges += 1
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — every bomb is another hunter
+		CharacterId.MINER:
+			# The extra charge is what makes the character playable at all: mines
+			# and bombs share one pool, so at a single charge every mine planted
+			# is a round spent unable to break a crate or answer anyone.
+			bomb_count_max += 1
+			bomb_count_current = bomb_count_max
+			bomb_level += 1
+			# RADIUS, where everyone else with a trap-shaped kit takes BOMB_COUNT.
+			# Mines explode at half radius rounded down, so a radius step is the
+			# only thing that lifts them out of covering barely their own cell —
+			# and it is worth double to the Miner, whose ordinary bombs grow too.
+			powerup_weights = [1, 3, 1, 1]
 	stats_changed.emit()
 
 ## GameManager owns the slot->device bookkeeping, but the live character in the
@@ -1123,19 +1135,38 @@ func _scripted_move_to(target_pos: Vector2, duration: float) -> void:
 	)
 
 func place_bomb() -> void:
+	_place_ordnance(false)
+
+## Bombs and the Miner's mines come out of one pool, not two, so seeding ground
+## is always paid for in firepower they no longer have and a bomb-count powerup
+## reads the same to them as to anyone.
+##
+## The last charge is never allowed to be a mine — a mine costs two, so at three
+## charges the Miner can have at most two mines out, and at one charge none at
+## all. A mine only pays off if somebody walks into it, which is not something
+## its owner controls; without this rule the Miner could spend their entire
+## arsenal on ground nobody happened to cross and stand there with no way to
+## break a crate, defend themselves, or do anything but wait.
+func _place_ordnance(as_mine: bool) -> bool:
 	if arena == null:
-		return
+		return false
 	var current_cell := get_current_cell()
-	if bomb_count_current <= 0 or arena.has_bomb_at(current_cell):
-		return
+	if bomb_count_current < (2 if as_mine else 1) or arena.has_bomb_at(current_cell):
+		return false
 	var bomb := BombScene.instantiate()
 	bomb.cell = current_cell
 	bomb.arena = arena
 	bomb.owner_player = self
-	bomb.radius = bomb_radius
-	bomb.is_circle_blast = character_id == CharacterId.PYRO
-	bomb.remote = character_id == CharacterId.BOMB_MASTER
-	bomb.magnetic = character_id == CharacterId.MAGNET
+	bomb.is_mine = as_mine
+	# Half radius, rounded down but never to nothing: a mine that only covered
+	# the cell it sits on could not chain, and a minefield that can't chain is a
+	# collection of unrelated single squares rather than a field.
+	bomb.radius = maxi(1, bomb_radius / 2) if as_mine else bomb_radius
+	# A mine is its own kind of ordnance — it never also inherits the character
+	# passive that shapes that player's ordinary bombs.
+	bomb.is_circle_blast = not as_mine and character_id == CharacterId.PYRO
+	bomb.remote = not as_mine and character_id == CharacterId.BOMB_MASTER
+	bomb.magnetic = not as_mine and character_id == CharacterId.MAGNET
 	bomb.position = arena.cell_to_world(current_cell)
 	arena.add_child(bomb)
 	bomb.exploded.connect(_on_owned_bomb_exploded.bind(bomb))
@@ -1144,7 +1175,8 @@ func place_bomb() -> void:
 	# The bomb lands under the player's feet — it only becomes solid for them
 	# once they've walked clear of it (see _release_cleared_bombs).
 	_bomb_grace[current_cell] = true
-	Sfx.play("bomb_place")
+	Sfx.play("wall_place" if as_mine else "bomb_place")
+	return true
 
 func _on_owned_bomb_exploded(bomb: Node) -> void:
 	live_bombs.erase(bomb)
@@ -1159,6 +1191,8 @@ func use_ability() -> void:
 			used = _ability_temp_wall()
 		CharacterId.BOMB_MASTER:
 			used = _ability_detonate()
+		CharacterId.MINER:
+			used = _place_ordnance(true)
 	if used:
 		ability_on_cooldown = true
 		get_tree().create_timer(ability_cooldown).timeout.connect(func(): ability_on_cooldown = false)

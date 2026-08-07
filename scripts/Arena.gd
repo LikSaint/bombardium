@@ -256,21 +256,38 @@ func is_block(cell: Vector2i) -> bool:
 func is_walkable(cell: Vector2i) -> bool:
 	if get_cell_state(cell) != CellState.EMPTY:
 		return false
-	if bombs_by_cell.has(cell):
+	if has_blocking_bomb_at(cell):
 		return false
 	return true
+
+## A bomb blocks the cell it sits on — except a Miner's mine, which is meant to
+## be walked over and would be a wall rather than a trap otherwise.
+##
+## Note this is about *people*. Bombs still treat a mine's cell as occupied
+## (see Bomb._can_enter, which asks has_bomb_at): bombs_by_cell holds one bomb
+## per cell, so letting a sliding or crawling bomb move onto a mine would
+## overwrite the mine's entry in the index and orphan it.
+func has_blocking_bomb_at(cell: Vector2i) -> bool:
+	var bomb = bombs_by_cell.get(cell)
+	return bomb != null and not bomb.is_mine
 
 # Same as is_walkable(), except a temp wall is passable for the player who
 # placed it (everyone else, bombs, and explosions still treat it as solid).
 # Pyro can also walk through their own bombs.
 func is_walkable_for(cell: Vector2i, player: Node) -> bool:
 	if get_cell_state(cell) == CellState.WALL and temp_wall_cells.get(cell) == player:
-		return not bombs_by_cell.has(cell)
-	# Pyro and Magnet can pass through their own bombs. For the Magnet it is not
-	# a convenience but a requirement of the kit: their bombs move, so a bomb can
-	# come and park itself in a doorway the owner is standing in, and a Magnet
-	# who could be walled in by their own ammunition would be fighting themselves.
-	if bombs_by_cell.has(cell) and player.character_id in [PlayerScript.CharacterId.PYRO, PlayerScript.CharacterId.MAGNET]:
+		return not has_blocking_bomb_at(cell)
+	# Pyro, Magnet and Sapper can pass through their own bombs. For the latter two
+	# this is a requirement of the kit rather than a convenience: the Magnet's
+	# bombs move, so one can come and park itself in a doorway its owner is
+	# standing in, and the Sapper's sit armed for eight seconds at a stretch.
+	# Either character could otherwise wall themselves in with their own
+	# ammunition and spend the round fighting it instead of anybody else.
+	if bombs_by_cell.has(cell) and player.character_id in [
+		PlayerScript.CharacterId.PYRO,
+		PlayerScript.CharacterId.MAGNET,
+		PlayerScript.CharacterId.BOMB_MASTER,
+	]:
 		var bomb = bombs_by_cell[cell]
 		if bomb.owner_player == player:
 			return true

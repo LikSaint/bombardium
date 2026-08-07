@@ -24,6 +24,7 @@ const STRINGS := {
 		"CHAR_NAME_PYRO": "Пиро",
 		"CHAR_NAME_BOMB_KICKER": "Хокеист",
 		"CHAR_NAME_MAGNET": "Магнетто",
+		"CHAR_NAME_MINER": "Минёр",
 
 		"CHAR_DESC_BOMB_MASTER": "Очень длинный фитиль — можно подорвать в любой момент кнопкой (%s)",
 		"CHAR_DESC_SCOUT": "Самый быстрый; двойное нажатие в сторону — перепрыгивает через ящик, бомбу или даже стену",
@@ -31,6 +32,7 @@ const STRINGS := {
 		"CHAR_DESC_PYRO": "Бомбы взрываются кругом и немного пробивают ящики",
 		"CHAR_DESC_BOMB_KICKER": "Толкает бомбы движением — свои и чужие; разгоняется, пока бежит по прямой",
 		"CHAR_DESC_MAGNET": "Его бомбы сами ползут к ближайшему сопернику — медленно, но неотвязно",
+		"CHAR_DESC_MINER": "%s: Ставит мину — по ней ходят, пока не подойдёт чужой. Радиус вдвое меньше, и последний заряд миной не потратить",
 
 		"MAP_SIZE_TINY": "Крошечная",
 		"MAP_SIZE_SMALL": "Маленькая",
@@ -89,6 +91,7 @@ const STRINGS := {
 		"CHAR_NAME_PYRO": "Pyro",
 		"CHAR_NAME_BOMB_KICKER": "Hockey Player",
 		"CHAR_NAME_MAGNET": "Magnetto",
+		"CHAR_NAME_MINER": "Miner",
 
 		"CHAR_DESC_BOMB_MASTER": "Very long fuse — set them off whenever you like with the button (%s)",
 		"CHAR_DESC_SCOUT": "Fastest on their feet; double-tap a direction to hop over a crate, a bomb, or even a wall",

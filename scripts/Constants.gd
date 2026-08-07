@@ -106,7 +106,7 @@ const PLAYER_COLORS := [
 # 4-directional PixelLab sprite (single flat image per direction, not a
 # tintable-layer setup) — team color is applied as a soft whole-sprite
 # modulate blend in CharacterPortrait.gd rather than a clothes-only tint.
-const CHARACTER_COUNT := 6
+const CHARACTER_COUNT := 7
 
 const CHARACTER_NAME_KEYS := [
 	"CHAR_NAME_BOMB_MASTER",
@@ -115,6 +115,7 @@ const CHARACTER_NAME_KEYS := [
 	"CHAR_NAME_PYRO",
 	"CHAR_NAME_BOMB_KICKER",
 	"CHAR_NAME_MAGNET",
+	"CHAR_NAME_MINER",
 ]
 
 func character_name(character_id: int) -> String:
@@ -129,6 +130,7 @@ const CHARACTER_ABILITY_DESC_KEYS := [
 	"CHAR_DESC_PYRO",
 	"CHAR_DESC_BOMB_KICKER",
 	"CHAR_DESC_MAGNET",
+	"CHAR_DESC_MINER",
 ]
 
 ## A blurb for a character with a button-press ability carries a single `%s`;
@@ -184,6 +186,15 @@ const CHARACTER_SPRITES := [
 		"east": preload("res://assets/characters/magnet_east.png"),
 		"west": preload("res://assets/characters/magnet_west.png"),
 	},
+	# Re-skin: the Parkour Runner's frames with the near-white kit recoloured to
+	# dark khaki. Same standing offer as the Magnet — a sheet of the Miner's own
+	# costs 5 PixelLab generations against a trial with 3 left.
+	{
+		"south": preload("res://assets/characters/miner_south.png"),
+		"north": preload("res://assets/characters/miner_north.png"),
+		"east": preload("res://assets/characters/miner_east.png"),
+		"west": preload("res://assets/characters/miner_west.png"),
+	},
 ]
 
 # Same character/direction keys as CHARACTER_SPRITES, but each entry is an
@@ -227,6 +238,13 @@ const CHARACTER_WALK_FRAMES := [
 		"east": [preload("res://assets/characters/walk/magnet_east_0.png"), preload("res://assets/characters/walk/magnet_east_1.png"), preload("res://assets/characters/walk/magnet_east_2.png"), preload("res://assets/characters/walk/magnet_east_3.png"), preload("res://assets/characters/walk/magnet_east_4.png"), preload("res://assets/characters/walk/magnet_east_5.png")],
 		"west": [preload("res://assets/characters/walk/magnet_west_0.png"), preload("res://assets/characters/walk/magnet_west_1.png"), preload("res://assets/characters/walk/magnet_west_2.png"), preload("res://assets/characters/walk/magnet_west_3.png"), preload("res://assets/characters/walk/magnet_west_4.png"), preload("res://assets/characters/walk/magnet_west_5.png")],
 	},
+	# Re-skin — see the note on the Miner's entry in CHARACTER_SPRITES.
+	{
+		"south": [preload("res://assets/characters/walk/miner_south_0.png"), preload("res://assets/characters/walk/miner_south_1.png"), preload("res://assets/characters/walk/miner_south_2.png"), preload("res://assets/characters/walk/miner_south_3.png"), preload("res://assets/characters/walk/miner_south_4.png"), preload("res://assets/characters/walk/miner_south_5.png")],
+		"north": [preload("res://assets/characters/walk/miner_north_0.png"), preload("res://assets/characters/walk/miner_north_1.png"), preload("res://assets/characters/walk/miner_north_2.png"), preload("res://assets/characters/walk/miner_north_3.png"), preload("res://assets/characters/walk/miner_north_4.png"), preload("res://assets/characters/walk/miner_north_5.png")],
+		"east": [preload("res://assets/characters/walk/miner_east_0.png"), preload("res://assets/characters/walk/miner_east_1.png"), preload("res://assets/characters/walk/miner_east_2.png"), preload("res://assets/characters/walk/miner_east_3.png"), preload("res://assets/characters/walk/miner_east_4.png"), preload("res://assets/characters/walk/miner_east_5.png")],
+		"west": [preload("res://assets/characters/walk/miner_west_0.png"), preload("res://assets/characters/walk/miner_west_1.png"), preload("res://assets/characters/walk/miner_west_2.png"), preload("res://assets/characters/walk/miner_west_3.png"), preload("res://assets/characters/walk/miner_west_4.png"), preload("res://assets/characters/walk/miner_west_5.png")],
+	},
 ]
 
 # Starting stats for a character (before any upgrades), for the lobby's stat
@@ -252,6 +270,8 @@ func get_character_stats(character_id: int) -> Dictionary:
 		5:  # Magnet
 			stats["bombs"] = 2
 			stats["shield"] = 1
+		6:  # Miner
+			stats["bombs"] = 2
 	return stats
 
 enum PowerupType { BOMB_COUNT, RADIUS, SPEED, SHIELD }

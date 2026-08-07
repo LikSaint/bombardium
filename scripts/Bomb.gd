@@ -48,12 +48,33 @@ const MAGNET_CATCH_FUSE_BONUS := 1.0
 ## planted somewhere thoughtless comes back around to its owner.
 const REMOTE_FUSE_DURATION := 8.0
 
+## The Miner's trap. A mine has no fuse and — unlike every other bomb — is not
+## solid: players walk straight over it, which is the whole point of a trap. It
+## goes off the moment an opponent steps anywhere its own blast would reach, and
+## never for the Miner themselves, who therefore owns the ground they seeded.
+##
+## Trigger range is not a number of its own: it *is* the blast footprint, walls
+## and crates included (see _blast_cells). A mine on half of a radius-4 bomb
+## covers two cells and so fires at two cells — the range you can see from the
+## explosion is the range you have to respect, and neither can drift from the
+## other as radius powerups come in.
+##
+## MINE_ARM_DELAY keeps a freshly planted mine from going off in the face of an
+## opponent already standing there. MINE_TRIP_DELAY is the tell, and it is the
+## difference between a trap and a coin flip: a mine that detonated the instant
+## someone crossed into it would kill anyone who ran past with no way to have
+## played around it. A third of a second is long enough for a player at speed to
+## be through and clear, and far too short to stroll out of.
+const MINE_ARM_DELAY := 0.6
+const MINE_TRIP_DELAY := 0.3
+
 signal exploded
 
 @export var radius: int = 2
 @export var is_circle_blast: bool = false # Pyro passive: fills a radius instead of a cross
 @export var remote: bool = false # Sapper passive: no fuse, detonated only on demand
 @export var magnetic: bool = false # Magnet passive: crawls toward the nearest opponent
+@export var is_mine: bool = false # Miner ability: walkable, no fuse, tripped by opponents
 var cell: Vector2i
 var arena: Node2D
 var owner_player: Node2D
@@ -66,6 +87,8 @@ var _magnet_dir: Vector2i = Vector2i.ZERO
 var _magnet_caught: bool = false # the catch bonus is once per bomb, not once per step
 var _magnet_dormant: bool = true # nobody in range; drawn asleep rather than merely still
 var _fuse_total: float = 0.0
+var _mine_age: float = 0.0
+var _mine_trip_left: float = -1.0 # >= 0 once tripped: counting down to the blast
 
 const FUSE_BASE := Vector2(8, -6)
 const FUSE_TIP_FULL := Vector2(20, -20)
@@ -74,10 +97,16 @@ const ANTENNA_BLINK_PERIOD := 0.8 # seconds per full on/off cycle
 func _ready() -> void:
 	arena.register_bomb(cell, self)
 	$BombBody.texture = Consts.BOMB_TEXTURE
-	$Fuse.visible = not remote
-	$Spark.visible = not remote
+	$Fuse.visible = not remote and not is_mine
+	$Spark.visible = not remote and not is_mine
 	$Antenna.visible = remote
 	$AntennaTip.visible = remote
+	if is_mine:
+		# No Timer at all: a mine waits for a footstep, not a clock. It also sits
+		# lower and smaller than a bomb, because something you are meant to walk
+		# over should not look like something you are meant to walk around.
+		$BombBody.scale = Vector2.ONE * 0.85
+		return
 	if remote:
 		$Timer.wait_time = REMOTE_FUSE_DURATION
 	_fuse_total = $Timer.wait_time
@@ -86,7 +115,10 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if has_exploded:
 		return
-	if remote:
+	if is_mine:
+		_update_mine(delta)
+		queue_redraw() # the arm/trip cue in _draw() animates every frame
+	elif remote:
 		_update_antenna_blink()
 	else:
 		_update_fuse_cue()
@@ -120,6 +152,48 @@ func _update_antenna_blink() -> void:
 	var freq: float = lerp(1.0 / ANTENNA_BLINK_PERIOD, 9.0, 1.0 - _fuse_ratio())
 	var phase := fmod(Time.get_ticks_msec() / 1000.0 * freq, 1.0)
 	$AntennaTip.modulate.a = 1.0 if phase < 0.5 else 0.15
+
+## A mine's whole life: arm, wait however long it takes, trip, go off.
+##
+## The owner is skipped, and that is the character rather than a convenience —
+## the Miner walks their own field freely, which is what makes seeding ground
+## worth doing at all instead of just being a slower way to place a bomb. They
+## are still perfectly capable of dying to a mine somebody else tripped next to
+## them, so the field is not a safe room.
+func _update_mine(delta: float) -> void:
+	_mine_age += delta
+	if _mine_trip_left >= 0.0:
+		_mine_trip_left -= delta
+		if _mine_trip_left <= 0.0:
+			explode()
+		return
+	if _mine_age < MINE_ARM_DELAY:
+		return
+	var blast := _blast_cells()
+	for p in get_tree().get_nodes_in_group("players"):
+		if p == owner_player or not p.alive:
+			continue
+		if blast.has(arena.world_to_cell(p.position)):
+			_mine_trip_left = MINE_TRIP_DELAY
+			Sfx.play("countdown_tick")
+			return
+
+## Cells this bomb's blast would actually reach, walls and crates accounted for.
+## Deliberately walks the same rays as _explode_cross, so a mine's trigger range
+## and its kill range are the same thing by construction rather than by two
+## constants that happen to agree — and so an opponent safely round a corner
+## doesn't set off a mine that could never have touched them.
+func _blast_cells() -> Dictionary:
+	var cells := {cell: true}
+	for dir in Consts.DIRECTIONS:
+		for i in range(1, radius + 1):
+			var c: Vector2i = cell + dir * i
+			if not arena.in_bounds(c) or arena.is_wall(c):
+				break
+			cells[c] = true
+			if arena.is_block(c):
+				break
+	return cells
 
 ## How much fuse is left, 1.0 to 0.0. Measured against the fuse the bomb was
 ## planted with rather than against Timer.wait_time, because a magnet bomb that
@@ -380,8 +454,33 @@ const MAGNET_HALO_PERIOD := 0.9
 ## its leading edge says which way it is crawling, and therefore whose problem
 ## it currently is. Drawn on the Bomb node itself, so it sits under the bomb
 ## body rather than over it.
+const MINE_IDLE_COLOR := Color(0.95, 0.72, 0.25)
+const MINE_TRIP_COLOR := Color(1.0, 0.25, 0.2)
+
+## A mine has to advertise itself just enough. It is drawn as a flat ring on the
+## ground rather than a silhouette standing up off it — the shape says "this is
+## floor you may cross", and the colour says crossing it is a decision. Once
+## tripped it strobes on the way out, which is the entire counterplay: the tell
+## has to be impossible to miss even when it is far too short to stroll out of.
+func _draw_mine() -> void:
+	if _mine_trip_left >= 0.0:
+		var strobe := fmod(_mine_trip_left, 0.1) < 0.05
+		draw_circle(Vector2.ZERO, 15.0, Color(MINE_TRIP_COLOR, 0.45 if strobe else 0.15))
+		draw_arc(Vector2.ZERO, 15.0, 0.0, TAU, 22, Color(MINE_TRIP_COLOR, 1.0 if strobe else 0.4), 2.5)
+		return
+	# Still arming: dim, and no pulse, so it plainly isn't live yet.
+	var armed := _mine_age >= MINE_ARM_DELAY
+	var pulse := 0.35 + 0.25 * absf(sin(Time.get_ticks_msec() / 1000.0 * PI))
+	draw_arc(Vector2.ZERO, 15.0, 0.0, TAU, 22, Color(MINE_IDLE_COLOR, pulse if armed else 0.18), 2.0)
+	draw_arc(Vector2.ZERO, 6.0, 0.0, TAU, 14, Color(MINE_IDLE_COLOR, 0.5 if armed else 0.18), 1.5)
+
 func _draw() -> void:
-	if not magnetic or has_exploded:
+	if has_exploded:
+		return
+	if is_mine:
+		_draw_mine()
+		return
+	if not magnetic:
 		return
 	# Asleep: the core ring only, dimmed. No outgoing pulse and no wedge, so a
 	# bomb nobody is close enough to wake reads as inert at a glance instead of
