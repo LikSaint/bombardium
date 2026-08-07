@@ -80,46 +80,28 @@ func _explode_cross() -> void:
 				break
 
 func _explode_circle() -> void:
-	# Pyro: diamond blast. Each block/temp wall pierced reduces remaining range by 1.
+	# Pyro: diamond blast (manhattan distance <= radius). Pierces blocks until range runs out.
 	_spawn_explosion(cell)
 	if arena.is_temp_wall(cell):
 		arena.destroy_temp_wall_at(cell)
 
-	# 4 cardinal directions
-	var directions = [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]
-
-	for dir in directions:
-		var blocks_hit = 0
-		for i in range(1, radius + 1):
-			var c: Vector2i = cell + dir * i
+	for dx in range(-radius, radius + 1):
+		for dy in range(-radius, radius + 1):
+			if abs(dx) + abs(dy) > radius:
+				continue
+			if dx == 0 and dy == 0:
+				continue
+			var c: Vector2i = cell + Vector2i(dx, dy)
 			if not arena.in_bounds(c):
-				break
+				continue
 			if arena.is_wall(c):
-				# Permanent wall stops blast
-				break
-
-			var is_destructible = arena.is_temp_wall(c) or arena.is_block(c)
-
-			# If position exceeds radius minus blocks hit, only continue if destructible
-			if i > radius - blocks_hit:
-				if is_destructible:
-					_spawn_explosion(c)
-					if arena.is_temp_wall(c):
-						arena.destroy_temp_wall_at(c)
-					elif arena.is_block(c):
-						arena.destroy_block_at(c)
-					blocks_hit += 1
-				break
-
-			if is_destructible:
-				_spawn_explosion(c)
-				if arena.is_temp_wall(c):
-					arena.destroy_temp_wall_at(c)
-				elif arena.is_block(c):
-					arena.destroy_block_at(c)
-				blocks_hit += 1
+				continue
+			_spawn_explosion(c)
+			if arena.is_temp_wall(c):
+				arena.destroy_temp_wall_at(c)
+			elif arena.is_block(c):
+				arena.destroy_block_at(c)
 			else:
-				_spawn_explosion(c)
 				_trigger_chain_at(c)
 
 func _trigger_chain_at(target_cell: Vector2i) -> void:
