@@ -6,13 +6,8 @@
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
 size = Vector2(60, 60)
 
-[node name="Explosion" type="Area2D"]
+[node name="Explosion" type="Node2D"]
 script = ExtResource("1")
-collision_layer = 0
-collision_mask = 1
-
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-shape = SubResource("RectangleShape2D_1")
 
 [node name="Sprite" type="Sprite2D" parent="."]
 texture = ExtResource("2")

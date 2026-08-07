@@ -27,11 +27,11 @@ signal stats_changed
 @export var character_id: int = CharacterId.BOMB_MASTER
 
 var arena: Node2D
-var current_cell: Vector2i
-var is_moving: bool = false
 var alive: bool = true
 var facing_dir: Vector2i = Consts.DIR_DOWN
 
+var velocity: Vector2 = Vector2.ZERO
+var move_speed: float = 0.0  # pixels per second
 var is_bot: bool = false
 const BOT_DECISION_INTERVAL := 0.6 # pause between bot decisions; higher = slower/calmer bots
 const BOT_DECISION_JITTER := 0.15 # +/- random spread so bots don't all tick in lockstep
@@ -50,6 +50,13 @@ var bomb_count_max: int = 1
 var bomb_count_current: int = 1
 var bomb_radius: int = 1
 var shield_charges: int = 0
+
+func get_current_cell() -> Vector2i:
+	return arena.world_to_cell(position)
+
+func _update_move_speed() -> void:
+	if move_duration > 0.0:
+		move_speed = Consts.CELL_SIZE / move_duration
 
 # Upgrade levels shown on the HUD (0 = base, unrelated to the raw stat values above).
 var bomb_level: int = 0
@@ -81,6 +88,7 @@ func _ready() -> void:
 	GameManager.player_reconnected.connect(_on_player_reconnected)
 	$Portrait.set_character(character_id, Consts.PLAYER_COLORS[(player_id - 1) % Consts.PLAYER_COLORS.size()])
 	_apply_character_passives()
+	_update_move_speed()
 
 func _apply_character_passives() -> void:
 	match character_id:
@@ -156,16 +164,36 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if not alive:
 		return
+
+	# Get input direction
 	var dir := _bot_update(delta) if is_bot else _poll_move_dir()
+
+	# Update facing direction
 	if dir != Vector2i.ZERO:
 		facing_dir = dir
 		$Portrait.face(dir)
+
 	if not is_bot and character_id == CharacterId.SCOUT:
 		_update_jump_double_tap()
-	if is_moving:
-		return
-	if dir != Vector2i.ZERO:
-		_try_move(dir)
+
+	# Apply smooth movement
+	if velocity != Vector2.ZERO:
+		position += velocity * delta
+
+		# Check if we've reached the target cell
+		if _current_move_end_cell != Vector2i.ZERO:
+			var target_pos = arena.cell_to_world(_current_move_end_cell)
+			var dist = position.distance_to(target_pos)
+			if dist < move_speed * delta:
+				position = target_pos
+				velocity = Vector2.ZERO
+				$Portrait.set_walking(false)
+				arena.try_collect_powerup(get_current_cell(), self)
+				_current_move_end_cell = Vector2i.ZERO
+
+	# Start new movement if we're not already moving and have input
+	if velocity == Vector2.ZERO and dir != Vector2i.ZERO:
+		_start_move(dir)
 
 func _poll_move_dir() -> Vector2i:
 	var x := 0.0
@@ -251,12 +279,15 @@ func _update_jump_double_tap() -> void:
 		var was_down: bool = _prev_held_dirs.get(d, false)
 		if is_down and not was_down:
 			var last_t: float = _last_dir_press_time.get(d, -INF)
-			if not is_moving and now - last_t <= DOUBLE_TAP_WINDOW:
+			if not velocity != Vector2.ZERO and now - last_t <= DOUBLE_TAP_WINDOW:
 				_try_jump_over_obstacle(d)
 			_last_dir_press_time[d] = now
 	_prev_held_dirs = held
 
 func _try_jump_over_obstacle(dir: Vector2i) -> void:
+	if velocity != Vector2.ZERO:
+		return
+	var current_cell := get_current_cell()
 	var mid_cell := current_cell + dir
 	var target_cell := current_cell + dir * 2
 	# A temp wall only counts as a jumpable obstacle when it's blocking *this*
@@ -269,7 +300,8 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 	facing_dir = dir
 	$Portrait.face(dir)
 	Sfx.play("jump")
-	_move_to_cell(target_cell, move_duration)
+	var target_pos = arena.cell_to_world(target_cell)
+	_jump_to(target_pos)
 
 ## Only actually moves once per decision (returns the chosen dir exactly the
 ## frame it's decided, Vector2i.ZERO every other frame) so the bot visibly
@@ -281,7 +313,7 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 ## note on is_fleeing above.
 func _bot_update(delta: float) -> Vector2i:
 	bot_decision_timer -= delta
-	if bot_decision_timer <= 0.0 and not is_moving:
+	if bot_decision_timer <= 0.0 and not velocity != Vector2.ZERO:
 		bot_move_dir = Vector2i.ZERO
 		_bot_think()
 		bot_decision_timer = 0.0 if is_fleeing else BOT_DECISION_INTERVAL + randf_range(-BOT_DECISION_JITTER, BOT_DECISION_JITTER)
@@ -291,6 +323,7 @@ func _bot_update(delta: float) -> Vector2i:
 	return Vector2i.ZERO
 
 func _bot_think() -> void:
+	var current_cell := get_current_cell()
 	var danger := _compute_danger_cells()
 	var hazard := _compute_active_hazard_cells()
 	if danger.has(current_cell) or hazard.has(current_cell):
@@ -360,7 +393,7 @@ func _enemy_at(cell: Vector2i) -> Node:
 	for p in get_tree().get_nodes_in_group("players"):
 		if p == self or not p.alive:
 			continue
-		if p.current_cell == cell:
+		if p.get_current_cell() == cell:
 			return p
 	return null
 
@@ -372,6 +405,7 @@ func _alive_enemies() -> Array:
 	return result
 
 func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
+	var current_cell := get_current_cell()
 	var own_blast := _blast_cells_for(current_cell, bomb_radius, character_id == CharacterId.PYRO)
 	var targets_enemy := false
 	var targets_block := false
@@ -417,6 +451,7 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 # soonest, not just BOMB_FUSE_DURATION, or a chain reaction can strand a bot
 # mid-escape with far less time than it planned for.
 func _time_until_forced_detonation() -> float:
+	var current_cell := get_current_cell()
 	var soonest := BOMB_FUSE_DURATION
 	for bomb_cell in arena.bombs_by_cell.keys():
 		var bomb = arena.bombs_by_cell[bomb_cell]
@@ -464,6 +499,7 @@ func _bfs_find(start: Vector2i, is_target: Callable, avoid: Dictionary = {}, max
 	return []
 
 func _bot_random_safe_dir(danger: Dictionary, hazard: Dictionary) -> Vector2i:
+	var current_cell := get_current_cell()
 	var options: Array = []
 	for dir in Consts.DIRECTIONS:
 		var c: Vector2i = current_cell + dir
@@ -485,6 +521,7 @@ func _bot_random_safe_dir(danger: Dictionary, hazard: Dictionary) -> Vector2i:
 	return options[randi() % options.size()]
 
 func _bot_flee(danger: Dictionary, hazard: Dictionary) -> void:
+	var current_cell := get_current_cell()
 	var unsafe: Dictionary = danger.duplicate()
 	for c in hazard:
 		unsafe[c] = true
@@ -495,6 +532,7 @@ func _bot_flee(danger: Dictionary, hazard: Dictionary) -> void:
 		bot_move_dir = _bot_random_safe_dir(danger, hazard)
 
 func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
+	var current_cell := get_current_cell()
 	# Unlike fleeing, wandering is never forced through danger — there's no
 	# urgency, so avoid every currently-ticking blast footprint entirely
 	# (not just active hazards), or the hunt for an enemy/block can route the
@@ -521,8 +559,8 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 		# the chase would "arrive" instantly every tick and the bot would stand
 		# still forever — two bots stacked on one cell used to freeze each other
 		# that way, and with the last players stuck the round could never end.
-		if e.current_cell != current_cell:
-			targets[e.current_cell] = true
+		if e.get_current_cell() != current_cell:
+			targets[e.get_current_cell()] = true
 	if path.is_empty() and not targets.is_empty():
 		path = _bfs_find(current_cell, func(c): return targets.has(c), unsafe)
 	if path.is_empty():
@@ -541,27 +579,10 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 
 const PORTRAIT_REST_Y := -4.0
 
-var _move_tween: Tween
-
-func _move_to_cell(target_cell: Vector2i, duration: float) -> void:
-	# A shove can interrupt a step that's still animating; without killing the
-	# old tween the two would fight over `position` and land on the wrong cell.
-	if _move_tween != null and _move_tween.is_valid():
-		_move_tween.kill()
-	is_moving = true
-	$Portrait.set_walking(true, duration)
-	var tw := create_tween()
-	tw.tween_property(self, "position", arena.cell_to_world(target_cell), duration)
-	tw.finished.connect(func():
-		current_cell = target_cell
-		is_moving = false
-		$Portrait.set_walking(false)
-		arena.try_collect_powerup(current_cell, self)
-	)
-	_move_tween = tw
-
-func _try_move(dir: Vector2i) -> void:
+func _start_move(dir: Vector2i) -> void:
+	var current_cell := get_current_cell()
 	var target_cell := current_cell + dir
+
 	if character_id == CharacterId.BOMB_KICKER:
 		# Always pushes whatever bomb is ahead — own or an opponent's — just by
 		# walking into it; if the push clears the cell, movement continues into it.
@@ -570,12 +591,21 @@ func _try_move(dir: Vector2i) -> void:
 			bomb.start_slide(dir)
 			Sfx.play("bomb_kick")
 			_play_kick_anim()
+
 	if not arena.is_walkable_for(target_cell, self):
 		return
+
 	Sfx.play("footstep", 1.0, 0.1)
-	_move_to_cell(target_cell, move_duration)
+	velocity = Vector2(dir) * move_speed
+	_current_move_end_cell = target_cell
+
+func _jump_to(target_pos: Vector2) -> void:
+	velocity = (target_pos - position).normalized() * move_speed
+
+var _current_move_end_cell: Vector2i
 
 func place_bomb() -> void:
+	var current_cell := get_current_cell()
 	if bomb_count_current <= 0 or arena.has_bomb_at(current_cell):
 		return
 	var bomb := BombScene.instantiate()
@@ -610,7 +640,7 @@ func use_ability() -> void:
 func _ability_temp_wall() -> bool:
 	if active_temp_walls.size() >= bomb_level + 1:
 		return false
-	var wall: Node = arena.place_temp_wall(current_cell, self)
+	var wall: Node = arena.place_temp_wall(get_current_cell(), self)
 	if wall == null:
 		return false
 	active_temp_walls.append(wall)
@@ -642,6 +672,7 @@ func apply_powerup(type: int) -> void:
 			radius_level += 1
 		Consts.PowerupType.SPEED:
 			move_duration *= 0.9
+			_update_move_speed()
 			speed_level += 1
 		Consts.PowerupType.SHIELD:
 			shield_charges += 1
@@ -688,13 +719,15 @@ func crush(from_cell: Vector2i, push_dir: Vector2i) -> void:
 	# `from_cell` is the walled cell, which is not necessarily current_cell:
 	# a player caught mid-step is counted by where they're drawn, and that's
 	# also where the shove has to start from.
-	current_cell = from_cell
+	position = arena.cell_to_world(from_cell)
 	var escape: Vector2i = _escape_cell(from_cell, push_dir)
 	if escape == INVALID_CELL:
 		_kill()
 		return
 	facing_dir = push_dir
-	_move_to_cell(escape, SHOVE_DURATION)
+	var escape_pos = arena.cell_to_world(escape)
+	velocity = (escape_pos - position).normalized() * (Consts.CELL_SIZE / SHOVE_DURATION)
+	_current_move_end_cell = escape
 
 const INVALID_CELL := Vector2i(-1, -1)
 
