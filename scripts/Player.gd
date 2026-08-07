@@ -310,9 +310,11 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 	var own_blast := _blast_cells_for(current_cell, bomb_radius, character_id == CharacterId.PYRO)
 	var targets_enemy := false
 	var targets_block := false
+	# Nothing stops two players sharing a cell (walkability ignores players), so
+	# current_cell has to be scanned for enemies like any other blast cell — an
+	# enemy standing right on top of the bot is its best shot, not a blind spot.
+	# A block there is impossible, since blocks aren't walkable.
 	for c in own_blast:
-		if c == current_cell:
-			continue
 		if _enemy_at(c) != null:
 			targets_enemy = true
 		elif arena.is_block(c):
@@ -435,12 +437,16 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 	var unsafe: Dictionary = danger.duplicate()
 	for c in hazard:
 		unsafe[c] = true
-	var enemies := _alive_enemies()
-	var path: Array = []
-	if not enemies.is_empty():
-		var targets := {}
-		for e in enemies:
+	var targets := {}
+	for e in _alive_enemies():
+		# An enemy already sharing this cell is not somewhere to walk to. Left in,
+		# the chase would "arrive" instantly every tick and the bot would stand
+		# still forever — two bots stacked on one cell used to freeze each other
+		# that way, and with the last players stuck the round could never end.
+		if e.current_cell != current_cell:
 			targets[e.current_cell] = true
+	var path: Array = []
+	if not targets.is_empty():
 		path = _bfs_find(current_cell, func(c): return targets.has(c), unsafe)
 	if path.is_empty():
 		path = _bfs_find(current_cell, func(c):
