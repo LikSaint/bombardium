@@ -266,8 +266,11 @@ func is_walkable(cell: Vector2i) -> bool:
 func is_walkable_for(cell: Vector2i, player: Node) -> bool:
 	if get_cell_state(cell) == CellState.WALL and temp_wall_cells.get(cell) == player:
 		return not bombs_by_cell.has(cell)
-	# Pyro can pass through their own bombs
-	if player.character_id == PlayerScript.CharacterId.PYRO and bombs_by_cell.has(cell):
+	# Pyro and Magnet can pass through their own bombs. For the Magnet it is not
+	# a convenience but a requirement of the kit: their bombs move, so a bomb can
+	# come and park itself in a doorway the owner is standing in, and a Magnet
+	# who could be walled in by their own ammunition would be fighting themselves.
+	if bombs_by_cell.has(cell) and player.character_id in [PlayerScript.CharacterId.PYRO, PlayerScript.CharacterId.MAGNET]:
 		var bomb = bombs_by_cell[cell]
 		if bomb.owner_player == player:
 			return true

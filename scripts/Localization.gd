@@ -23,12 +23,14 @@ const STRINGS := {
 		"CHAR_NAME_ENGINEER": "Инженер",
 		"CHAR_NAME_PYRO": "Пиро",
 		"CHAR_NAME_BOMB_KICKER": "Хокеист",
+		"CHAR_NAME_MAGNET": "Магнетто",
 
-		"CHAR_DESC_BOMB_MASTER": "Бомбы без фитиля — взрываются только по кнопке (%s)",
+		"CHAR_DESC_BOMB_MASTER": "Очень длинный фитиль — можно подорвать в любой момент кнопкой (%s)",
 		"CHAR_DESC_SCOUT": "Самый быстрый; двойное нажатие в сторону — перепрыгивает через ящик, бомбу или даже стену",
 		"CHAR_DESC_ENGINEER": "%s: Поставить стену, через которую проходит только сам. Стен — сколько бомб",
 		"CHAR_DESC_PYRO": "Бомбы взрываются кругом и немного пробивают ящики",
 		"CHAR_DESC_BOMB_KICKER": "Толкает бомбы движением — свои и чужие; разгоняется, пока бежит по прямой",
+		"CHAR_DESC_MAGNET": "Его бомбы сами ползут к ближайшему сопернику — медленно, но неотвязно",
 
 		"MAP_SIZE_TINY": "Крошечная",
 		"MAP_SIZE_SMALL": "Маленькая",
@@ -86,12 +88,14 @@ const STRINGS := {
 		"CHAR_NAME_ENGINEER": "Engineer",
 		"CHAR_NAME_PYRO": "Pyro",
 		"CHAR_NAME_BOMB_KICKER": "Hockey Player",
+		"CHAR_NAME_MAGNET": "Magnetto",
 
-		"CHAR_DESC_BOMB_MASTER": "Bombs have no fuse — they only go off when you press the button (%s)",
+		"CHAR_DESC_BOMB_MASTER": "Very long fuse — set them off whenever you like with the button (%s)",
 		"CHAR_DESC_SCOUT": "Fastest on their feet; double-tap a direction to hop over a crate, a bomb, or even a wall",
 		"CHAR_DESC_ENGINEER": "%s: Place a wall only they can pass through. One wall per bomb",
 		"CHAR_DESC_PYRO": "Bombs explode in a circle and punch through crates a bit",
 		"CHAR_DESC_BOMB_KICKER": "Pushes bombs by walking into them — theirs or anyone's; picks up speed while running in a straight line",
+		"CHAR_DESC_MAGNET": "Their bombs crawl toward the nearest opponent on their own — slowly, but they don't let go",
 
 		"MAP_SIZE_TINY": "Tiny",
 		"MAP_SIZE_SMALL": "Small",

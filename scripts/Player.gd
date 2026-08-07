@@ -15,7 +15,7 @@ extends CharacterBody2D
 const BombScene := preload("res://scenes/Bomb.tscn")
 const ExplosionScript := preload("res://scripts/Explosion.gd")
 
-enum CharacterId { BOMB_MASTER, SCOUT, ENGINEER, PYRO, BOMB_KICKER }
+enum CharacterId { BOMB_MASTER, SCOUT, ENGINEER, PYRO, BOMB_KICKER, MAGNET }
 
 const MOVE_DEADZONE := 0.35
 
@@ -190,6 +190,19 @@ func _apply_character_passives() -> void:
 			speed_level += 1
 			shield_charges += 1
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — more bombs, more pucks
+		CharacterId.MAGNET:
+			# No radius bonus: a blast that walks itself onto the target doesn't
+			# need to be big. The second bomb is what the kit actually runs on —
+			# one crawling bomb is a threat to walk around, two closing from
+			# different sides are what takes a cell away from someone. The shield
+			# is the concession to the Magnet living inside their own minefield:
+			# their bombs move, so unlike everyone else they can be caught out by
+			# ammunition they placed somewhere that was safe at the time.
+			bomb_count_max += 1
+			bomb_count_current = bomb_count_max
+			bomb_level += 1
+			shield_charges += 1
+			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — every bomb is another hunter
 	stats_changed.emit()
 
 ## GameManager owns the slot->device bookkeeping, but the live character in the
@@ -627,19 +640,18 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 # soonest, not just BOMB_FUSE_DURATION, or a chain reaction can strand a bot
 # mid-escape with far less time than it planned for.
 #
-# Remote (Sapper) bombs are skipped entirely: they carry no running Timer, so
-# reading one's time_left would report 0 and make every cell near an
-# unexploded mine look like an imminent detonation. They impose no clock of
-# their own — a remote bomb only ever goes off by a button press or by a
-# *ticking* bomb's blast reaching it, and that ticking bomb is what this scan
-# picks up regardless of what else happens to be sitting in its blast.
+# Remote (Sapper) bombs used to be skipped here, because they carried no running
+# Timer and reading time_left would have reported 0 — making every cell near an
+# unexploded mine look like an imminent detonation. They now run a long fuse of
+# their own (Bomb.REMOTE_FUSE_DURATION), so they belong in this scan like any
+# other bomb: while a mine has most of its fuse left it is simply never the
+# soonest threat and changes nothing, and once it is genuinely about to go off
+# it should tighten the budget exactly as a short fuse does.
 func _time_until_forced_detonation() -> float:
 	var current_cell := get_current_cell()
 	var soonest := BOMB_FUSE_DURATION
 	for bomb_cell in arena.bombs_by_cell.keys():
 		var bomb = arena.bombs_by_cell[bomb_cell]
-		if bomb.remote:
-			continue
 		if not _blast_cells_for(bomb_cell, bomb.radius, bomb.is_circle_blast).has(current_cell):
 			continue
 		soonest = min(soonest, bomb.get_node("Timer").time_left)
@@ -764,10 +776,10 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 
 ## Sapper trigger, bot side. Fires when an enemy is standing in the blast of a
 ## bomb this bot has out, or — once it's safely clear — when there's nothing
-## left to wait for but a block. This is the *only* way any of the bot's
-## bombs ever go off: they're remote mines with no fuse (see Bomb.gd), so
-## without this a bot would place its bombs once, run dry at
-## `bomb_count_max`, and never get a charge back for the rest of the round.
+## left to wait for but a block. Their bombs do run a long fuse of their own
+## (Bomb.REMOTE_FUSE_DURATION), so this is no longer the only thing standing
+## between the bot and running dry at `bomb_count_max` — but waiting out eight
+## seconds per charge is not playing the character, it's surviving it.
 ##
 ## The trigger is all-or-nothing (it sets off every bomb the bot owns, and
 ## chains from there), so the bot has to be clear of *all* of them, not just of
@@ -1123,6 +1135,7 @@ func place_bomb() -> void:
 	bomb.radius = bomb_radius
 	bomb.is_circle_blast = character_id == CharacterId.PYRO
 	bomb.remote = character_id == CharacterId.BOMB_MASTER
+	bomb.magnetic = character_id == CharacterId.MAGNET
 	bomb.position = arena.cell_to_world(current_cell)
 	arena.add_child(bomb)
 	bomb.exploded.connect(_on_owned_bomb_exploded.bind(bomb))
@@ -1173,16 +1186,19 @@ func _ability_temp_wall() -> bool:
 
 ## Sapper trigger: sets off every bomb they currently have out, at once.
 ##
-## The Sapper's bombs (Bomb.gd's `remote` flag, set in place_bomb() below)
-## carry no fuse at all — no Timer, no countdown, nothing but a blinking
-## antenna to say they're still armed. This is the *only* thing that sets
-## them off, short of another player's blast reaching them first. That turns
-## every placed bomb into a trap that pays off the moment someone walks into
-## it, rather than a warning anyone can see coming and step around — which
-## was the one thing the Sapper's kit was missing; they were pure
-## front-loaded stats that the rest of the roster caught up to on powerups
-## alone. It cuts both ways — the Sapper is standing in their own blast just
-## as often as anyone else, so the timing is on them.
+## The Sapper's bombs (Bomb.gd's `remote` flag, set in place_bomb() below) run
+## a fuse four times the normal length, with a blinking antenna instead of a
+## burning one. In practice this is what sets them off: eight seconds is long
+## enough that a planted bomb is a trap paying off the moment someone walks into
+## it, rather than a warning anyone can watch burn down and step around — which
+## was the one thing the Sapper's kit was missing; they were pure front-loaded
+## stats that the rest of the roster caught up to on powerups alone.
+##
+## The fuse exists so the trap is not free. A mine left in a bad spot eventually
+## answers for itself, a minefield can't be banked for a whole round, and the
+## charges come back without the Sapper having to spend a trigger on a corner of
+## the map nobody visited. It cuts both ways either way — the Sapper stands in
+## their own blast as often as anyone else, so the timing is still on them.
 ##
 ## Iterates over a copy: explode() chains into neighbouring bombs and feeds
 ## back into _on_owned_bomb_exploded, which mutates live_bombs mid-loop.
