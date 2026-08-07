@@ -64,7 +64,7 @@ horizontal_alignment = 1
 layout_mode = 0
 anchor_right = 1.0
 offset_top = 44.0
-offset_bottom = 390.0
+offset_bottom = 410.0
 theme_override_constants/separation = 14
 
 [node name="RoomRow" type="PanelContainer" parent="SettingsPanel/Rows"]
@@ -337,8 +337,8 @@ layout_mode = 0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -50.0
-offset_bottom = -24.0
+offset_top = -70.0
+offset_bottom = -44.0
 theme_override_font_sizes/font_size = 13
 theme_override_colors/font_color = Color(0.7, 0.72, 0.8, 0.85)
 horizontal_alignment = 1
