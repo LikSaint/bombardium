@@ -6,6 +6,7 @@ const BlockScene := preload("res://scenes/Block.tscn")
 const TempWallScene := preload("res://scenes/TempWall.tscn")
 const PowerupScene := preload("res://scenes/Powerup.tscn")
 const WALL_TEXTURE := preload("res://assets/props/wall.png")
+const PlayerScript := preload("res://scripts/Player.gd")
 
 enum CellState { EMPTY, WALL, BLOCK }
 
@@ -147,6 +148,9 @@ func try_collect_powerup(cell: Vector2i, player: Node) -> void:
 	if not powerups_by_cell.has(cell):
 		return
 	var type: int = powerups_by_cell[cell].type
+	# Pyro has a 50% chance to convert any powerup to BOMB_COUNT
+	if player.character_id == PlayerScript.CharacterId.PYRO and randf() < 0.5:
+		type = Consts.PowerupType.BOMB_COUNT
 	powerups_by_cell[cell].queue_free()
 	powerups_by_cell.erase(cell)
 	Sfx.play("powerup_pickup")
@@ -226,9 +230,15 @@ func is_walkable(cell: Vector2i) -> bool:
 
 # Same as is_walkable(), except a temp wall is passable for the player who
 # placed it (everyone else, bombs, and explosions still treat it as solid).
+# Pyro can also walk through their own bombs.
 func is_walkable_for(cell: Vector2i, player: Node) -> bool:
 	if get_cell_state(cell) == CellState.WALL and temp_wall_cells.get(cell) == player:
 		return not bombs_by_cell.has(cell)
+	# Pyro can pass through their own bombs
+	if player.character_id == PlayerScript.CharacterId.PYRO and bombs_by_cell.has(cell):
+		var bomb = bombs_by_cell[cell]
+		if bomb.owner_player == player:
+			return true
 	return is_walkable(cell)
 
 func register_bomb(cell: Vector2i, bomb: Node) -> void:
