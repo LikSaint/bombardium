@@ -30,13 +30,35 @@ var arena: Node2D
 var alive: bool = true
 var facing_dir: Vector2i = Consts.DIR_DOWN
 
-var velocity: Vector2 = Vector2.ZERO
-var move_speed: float = 0.0  # pixels per second
+# Movement is free-form, not cell-to-cell: `position` is continuous and the
+# grid only supplies collision. A direction change therefore takes effect the
+# same frame it is pressed, even halfway between two cells — turning back
+# without ever reaching the cell ahead is the normal case, not a special one.
+# `move_speed` stays derived from move_duration so every existing speed
+# upgrade (which scales move_duration) keeps working unchanged.
+var move_speed: float = 0.0 # px/s, = CELL_SIZE / move_duration
+
+# Half-extent of the box tested against the grid. Smaller than the cell so a
+# player lined up in a corridor never clips the walls flanking it.
+const PLAYER_HALF_EXTENT := 20.0
+const WALL_EPSILON := 0.01
+
+# Bombs this player is currently standing on top of. A bomb is impassable to
+# everyone, including whoever dropped it — but you have to be able to walk off
+# the one under your feet, so it stays passable until you clear the cell.
+var _bomb_grace: Dictionary = {} # Vector2i -> true
+# Set while a tween owns `position` (Scout hop, sudden-death shove); normal
+# input-driven movement stands down so the two never fight over the transform.
+var _scripted_move: bool = false
+
 var is_bot: bool = false
 const BOT_DECISION_INTERVAL := 0.6 # pause between bot decisions; higher = slower/calmer bots
 const BOT_DECISION_JITTER := 0.15 # +/- random spread so bots don't all tick in lockstep
 var bot_decision_timer: float = 0.0
 var bot_move_dir: Vector2i = Vector2i.ZERO
+var bot_target_cell: Vector2i = Vector2i.ZERO
+var bot_hold_time: float = 0.0
+const BOT_HOLD_TIMEOUT_FACTOR := 2.5 # give up on an unreachable target after this many step-times
 # While actively escaping a blast, decisions run every frame (no throttle) —
 # only casual wandering/bombing-consideration is paced by BOT_DECISION_INTERVAL.
 # Escape timing in _bot_should_bomb() assumes this, so don't throttle fleeing.
@@ -162,13 +184,13 @@ func _input(event: InputEvent) -> void:
 				pickup_weapon()
 
 func _physics_process(delta: float) -> void:
-	if not alive:
+	if not alive or arena == null:
+		return
+	if _scripted_move:
 		return
 
-	# Get input direction
 	var dir := _bot_update(delta) if is_bot else _poll_move_dir()
 
-	# Update facing direction
 	if dir != Vector2i.ZERO:
 		facing_dir = dir
 		$Portrait.face(dir)
@@ -176,24 +198,18 @@ func _physics_process(delta: float) -> void:
 	if not is_bot and character_id == CharacterId.SCOUT:
 		_update_jump_double_tap()
 
-	# Apply smooth movement
-	if velocity != Vector2.ZERO:
-		position += velocity * delta
+	_release_cleared_bombs()
 
-		# Check if we've reached the target cell
-		if _current_move_end_cell != Vector2i.ZERO:
-			var target_pos = arena.cell_to_world(_current_move_end_cell)
-			var dist = position.distance_to(target_pos)
-			if dist < move_speed * delta:
-				position = target_pos
-				velocity = Vector2.ZERO
-				$Portrait.set_walking(false)
-				arena.try_collect_powerup(get_current_cell(), self)
-				_current_move_end_cell = Vector2i.ZERO
+	if dir != Vector2i.ZERO:
+		_move_free(dir, delta)
+		$Portrait.set_walking(true, move_duration)
+	else:
+		$Portrait.set_walking(false)
 
-	# Start new movement if we're not already moving and have input
-	if velocity == Vector2.ZERO and dir != Vector2i.ZERO:
-		_start_move(dir)
+	# Pickup is driven by where the player's centre is, so it fires as soon as
+	# they're properly on the cell rather than on a step boundary that no
+	# longer exists.
+	arena.try_collect_powerup(get_current_cell(), self)
 
 func _poll_move_dir() -> Vector2i:
 	var x := 0.0
@@ -279,13 +295,13 @@ func _update_jump_double_tap() -> void:
 		var was_down: bool = _prev_held_dirs.get(d, false)
 		if is_down and not was_down:
 			var last_t: float = _last_dir_press_time.get(d, -INF)
-			if not velocity != Vector2.ZERO and now - last_t <= DOUBLE_TAP_WINDOW:
+			if not _scripted_move and now - last_t <= DOUBLE_TAP_WINDOW:
 				_try_jump_over_obstacle(d)
 			_last_dir_press_time[d] = now
 	_prev_held_dirs = held
 
 func _try_jump_over_obstacle(dir: Vector2i) -> void:
-	if velocity != Vector2.ZERO:
+	if _scripted_move or arena == null:
 		return
 	var current_cell := get_current_cell()
 	var mid_cell := current_cell + dir
@@ -300,8 +316,7 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 	facing_dir = dir
 	$Portrait.face(dir)
 	Sfx.play("jump")
-	var target_pos = arena.cell_to_world(target_cell)
-	_jump_to(target_pos)
+	_scripted_move_to(arena.cell_to_world(target_cell), move_duration)
 
 ## Only actually moves once per decision (returns the chosen dir exactly the
 ## frame it's decided, Vector2i.ZERO every other frame) so the bot visibly
@@ -313,16 +328,36 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 ## note on is_fleeing above.
 func _bot_update(delta: float) -> Vector2i:
 	bot_decision_timer -= delta
-	if bot_decision_timer <= 0.0 and not velocity != Vector2.ZERO:
-		bot_move_dir = Vector2i.ZERO
+
+	# A decision is a *cell* to walk to, but movement is now continuous, so the
+	# heading has to be held until the bot actually arrives — returning it for
+	# one frame like the old step-based version did would leave it twitching in
+	# place. Arrival is "at or past the centre", so an overshoot still counts.
+	if bot_move_dir != Vector2i.ZERO:
+		bot_hold_time += delta
+		var centre: Vector2 = arena.cell_to_world(bot_target_cell)
+		var reached: bool = (centre - position).dot(Vector2(bot_move_dir)) <= 0.0
+		# Safety valve: something blocked the way (a bomb slid in, a wall
+		# dropped) and the target is unreachable — re-decide instead of
+		# pushing into it forever.
+		if reached or bot_hold_time > move_duration * BOT_HOLD_TIMEOUT_FACTOR:
+			bot_move_dir = Vector2i.ZERO
+			bot_hold_time = 0.0
+		else:
+			return bot_move_dir
+
+	if bot_decision_timer <= 0.0:
 		_bot_think()
 		bot_decision_timer = 0.0 if is_fleeing else BOT_DECISION_INTERVAL + randf_range(-BOT_DECISION_JITTER, BOT_DECISION_JITTER)
-		var dir := bot_move_dir
-		bot_move_dir = Vector2i.ZERO
-		return dir
+		if bot_move_dir != Vector2i.ZERO:
+			bot_target_cell = get_current_cell() + bot_move_dir
+			bot_hold_time = 0.0
+		return bot_move_dir
 	return Vector2i.ZERO
 
 func _bot_think() -> void:
+	if arena == null:
+		return
 	var current_cell := get_current_cell()
 	var danger := _compute_danger_cells()
 	var hazard := _compute_active_hazard_cells()
@@ -579,32 +614,145 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 
 const PORTRAIT_REST_Y := -4.0
 
-func _start_move(dir: Vector2i) -> void:
-	var current_cell := get_current_cell()
-	var target_cell := current_cell + dir
+## One frame of free movement along `dir`.
+##
+## The player goes exactly where they asked whenever that's possible — no
+## automatic re-centring. Pressing up from a spot straddling two columns moves
+## straight up and keeps the horizontal offset; it does not slide to the middle
+## of a cell, which would read as unrequested diagonal movement.
+##
+## Corridor alignment is a *fallback*, applied only when the straight step is
+## blocked: with a box narrower than a cell, a few pixels of misalignment can
+## catch the corner of an obstacle in the neighbouring lane, and refusing the
+## move there would leave the player stuck for no visible reason. The nudge
+## lasts only until they line up, then movement is purely axial again.
+func _move_free(dir: Vector2i, delta: float) -> void:
+	var step := move_speed * delta
+	var straight := position + Vector2(dir) * step
 
-	if character_id == CharacterId.BOMB_KICKER:
-		# Always pushes whatever bomb is ahead — own or an opponent's — just by
-		# walking into it; if the push clears the cell, movement continues into it.
-		var bomb = arena.get_bomb_at(target_cell)
-		if bomb != null and not bomb.is_sliding:
-			bomb.start_slide(dir)
-			Sfx.play("bomb_kick")
-			_play_kick_anim()
-
-	if not arena.is_walkable_for(target_cell, self):
+	if _can_stand_at(straight):
+		_apply_move(straight)
 		return
 
-	Sfx.play("footstep", 1.0, 0.1)
-	velocity = Vector2(dir) * move_speed
-	_current_move_end_cell = target_cell
+	# From here the straight step is blocked by something.
+	_try_kick_ahead(dir)
 
-func _jump_to(target_pos: Vector2) -> void:
-	velocity = (target_pos - position).normalized() * move_speed
+	var centre: Vector2 = arena.cell_to_world(get_current_cell())
+	var aligned := position
+	if dir.x != 0:
+		aligned.y = move_toward(position.y, centre.y, step)
+	else:
+		aligned.x = move_toward(position.x, centre.x, step)
+	# Already lined up, so the obstacle is genuinely dead ahead rather than a
+	# corner being clipped — nothing to correct.
+	if not aligned.is_equal_approx(position):
+		# Corner cut: carry on forward *and* line up in the same frame.
+		var assisted := aligned
+		if dir.x != 0:
+			assisted.x = straight.x
+		else:
+			assisted.y = straight.y
+		if _can_stand_at(assisted):
+			_apply_move(assisted)
+			return
+		# Too far out of line to cut the corner in one frame: give up the
+		# forward step and just slide into alignment. Repeated over a few
+		# frames this walks the player around the corner instead of leaving
+		# them stuck against it, which is what a pure corner cut does when the
+		# misalignment exceeds a single frame's travel.
+		if _can_stand_at(aligned):
+			_apply_move(aligned)
+			return
 
-var _current_move_end_cell: Vector2i
+	# Genuinely walled off in that direction: come to rest flush against it.
+	var clamped := _clamp_to_boundary(straight, dir)
+	if not clamped.is_equal_approx(position) and _can_stand_at(clamped):
+		_apply_move(clamped)
+
+func _apply_move(target: Vector2) -> void:
+	position = target
+	if not _footstep_playing:
+		_footstep_playing = true
+		Sfx.play("footstep", 1.0, 0.1)
+		get_tree().create_timer(move_duration).timeout.connect(func(): _footstep_playing = false)
+
+var _footstep_playing: bool = false
+
+## Bomb-Kicker only shoves a bomb once actually pressed up against it, which is
+## now a collision outcome rather than "the next cell holds a bomb".
+func _try_kick_ahead(dir: Vector2i) -> void:
+	if character_id != CharacterId.BOMB_KICKER:
+		return
+	var ahead: Vector2i = arena.world_to_cell(position + Vector2(dir) * (PLAYER_HALF_EXTENT + 2.0))
+	var bomb = arena.get_bomb_at(ahead)
+	if bomb != null and not bomb.is_sliding:
+		bomb.start_slide(dir)
+		Sfx.play("bomb_kick")
+		_play_kick_anim()
+
+## Pushes `target` back so the leading edge rests flush against the boundary of
+## whatever it ran into, instead of the move being refused outright.
+func _clamp_to_boundary(target: Vector2, dir: Vector2i) -> Vector2:
+	var clamped := target
+	var cs := float(Consts.CELL_SIZE)
+	if dir.x > 0:
+		var col: int = arena.world_to_cell(Vector2(clamped.x + PLAYER_HALF_EXTENT, clamped.y)).x
+		clamped.x = col * cs - PLAYER_HALF_EXTENT - WALL_EPSILON
+	elif dir.x < 0:
+		var col: int = arena.world_to_cell(Vector2(clamped.x - PLAYER_HALF_EXTENT, clamped.y)).x
+		clamped.x = (col + 1) * cs + PLAYER_HALF_EXTENT + WALL_EPSILON
+	elif dir.y > 0:
+		var row: int = arena.world_to_cell(Vector2(clamped.x, clamped.y + PLAYER_HALF_EXTENT)).y
+		clamped.y = row * cs - PLAYER_HALF_EXTENT - WALL_EPSILON
+	elif dir.y < 0:
+		var row: int = arena.world_to_cell(Vector2(clamped.x, clamped.y - PLAYER_HALF_EXTENT)).y
+		clamped.y = (row + 1) * cs + PLAYER_HALF_EXTENT + WALL_EPSILON
+	return clamped
+
+func _can_stand_at(pos: Vector2) -> bool:
+	for ox in [-PLAYER_HALF_EXTENT, PLAYER_HALF_EXTENT]:
+		for oy in [-PLAYER_HALF_EXTENT, PLAYER_HALF_EXTENT]:
+			if not _is_open(arena.world_to_cell(pos + Vector2(ox, oy))):
+				return false
+	return true
+
+func _is_open(cell: Vector2i) -> bool:
+	if _bomb_grace.has(cell) and arena.has_bomb_at(cell):
+		return true
+	return arena.is_walkable_for(cell, self)
+
+## Cells the player's box currently touches.
+func _occupied_cells() -> Dictionary:
+	var cells := {}
+	for ox in [-PLAYER_HALF_EXTENT, PLAYER_HALF_EXTENT]:
+		for oy in [-PLAYER_HALF_EXTENT, PLAYER_HALF_EXTENT]:
+			cells[arena.world_to_cell(position + Vector2(ox, oy))] = true
+	return cells
+
+## Once the player is clear of a bomb they were standing on, it turns solid for
+## them like it already is for everyone else.
+func _release_cleared_bombs() -> void:
+	if _bomb_grace.is_empty():
+		return
+	var occupied := _occupied_cells()
+	for cell in _bomb_grace.keys():
+		if not occupied.has(cell) or not arena.has_bomb_at(cell):
+			_bomb_grace.erase(cell)
+
+## Tween-driven hop/shove: takes `position` away from input handling for its
+## duration so the two can't fight over the transform.
+func _scripted_move_to(target_pos: Vector2, duration: float) -> void:
+	_scripted_move = true
+	var tw := create_tween()
+	tw.tween_property(self, "position", target_pos, duration)
+	tw.finished.connect(func():
+		_scripted_move = false
+		$Portrait.set_walking(false)
+	)
 
 func place_bomb() -> void:
+	if arena == null:
+		return
 	var current_cell := get_current_cell()
 	if bomb_count_current <= 0 or arena.has_bomb_at(current_cell):
 		return
@@ -618,6 +766,9 @@ func place_bomb() -> void:
 	arena.add_child(bomb)
 	bomb.exploded.connect(_on_owned_bomb_exploded)
 	bomb_count_current -= 1
+	# The bomb lands under the player's feet — it only becomes solid for them
+	# once they've walked clear of it (see _release_cleared_bombs).
+	_bomb_grace[current_cell] = true
 	Sfx.play("bomb_place")
 
 func _on_owned_bomb_exploded() -> void:
@@ -725,9 +876,7 @@ func crush(from_cell: Vector2i, push_dir: Vector2i) -> void:
 		_kill()
 		return
 	facing_dir = push_dir
-	var escape_pos = arena.cell_to_world(escape)
-	velocity = (escape_pos - position).normalized() * (Consts.CELL_SIZE / SHOVE_DURATION)
-	_current_move_end_cell = escape
+	_scripted_move_to(arena.cell_to_world(escape), SHOVE_DURATION)
 
 const INVALID_CELL := Vector2i(-1, -1)
 
