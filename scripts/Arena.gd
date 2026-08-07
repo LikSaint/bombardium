@@ -132,25 +132,44 @@ func destroy_block_at(cell: Vector2i, owner_player: Node = null) -> void:
 	cells[cell] = CellState.EMPTY
 
 	var powerup_type: int = -1
+	var base_chance = Consts.powerup_chance_percent / 100.0
 
-	if owner_player != null and owner_player.character_id == PlayerScript.CharacterId.PYRO:
-		# Pyro: 5% each for RADIUS/SPEED/SHIELD + 15% for BOMB_COUNT = 30% total
-		var roll = randf() * 100.0
-		if roll < 5.0:
-			powerup_type = Consts.PowerupType.RADIUS
-		elif roll < 10.0:
-			powerup_type = Consts.PowerupType.SPEED
-		elif roll < 15.0:
-			powerup_type = Consts.PowerupType.SHIELD
-		elif roll < 30.0:
-			powerup_type = Consts.PowerupType.BOMB_COUNT
+	if owner_player != null and owner_player.has_meta("powerup_weights"):
+		# Use character's powerup weights system
+		powerup_type = _pick_powerup_by_weights(owner_player.powerup_weights,
+			base_chance * owner_player.powerup_chance_multiplier)
+	elif owner_player != null and owner_player.powerup_weights.size() == 4:
+		# Fallback for player with weights but no meta (shouldn't happen)
+		powerup_type = _pick_powerup_by_weights(owner_player.powerup_weights,
+			base_chance * owner_player.powerup_chance_multiplier)
 	else:
 		# Normal: map setting chance, then random type
-		if randf() < Consts.powerup_chance_percent / 100.0:
+		if randf() < base_chance:
 			powerup_type = randi() % 4
 
 	if powerup_type >= 0:
 		_spawn_powerup(cell, powerup_type)
+
+func _pick_powerup_by_weights(weights: Array[int], effective_chance: float) -> int:
+	# Calculate total weight
+	var total_weight = 0
+	for w in weights:
+		total_weight += w
+
+	if total_weight == 0:
+		return -1
+
+	# Roll based on effective chance and weights
+	var roll = randf()
+	var accumulated = 0.0
+
+	for powerup_type in range(4):
+		var probability = effective_chance * float(weights[powerup_type]) / float(total_weight)
+		accumulated += probability
+		if roll < accumulated:
+			return powerup_type
+
+	return -1
 
 func _spawn_powerup(cell: Vector2i, powerup_type: int) -> void:
 	var powerup := PowerupScene.instantiate()

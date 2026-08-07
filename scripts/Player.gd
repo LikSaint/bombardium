@@ -59,6 +59,12 @@ var speed_level: int = 0
 var ability_cooldown: float = 0.2
 var ability_on_cooldown: bool = false
 
+# Powerup weight distribution: [BOMB_COUNT, RADIUS, SPEED, SHIELD]
+# Default [1,1,1,1], modified by character type
+var powerup_weights: Array[int] = [1, 1, 1, 1]
+# Multiplier for total powerup spawn chance
+var powerup_chance_multiplier: float = 1.0
+
 # Scout/Runner: jumping a wooden block requires pressing the same direction
 # twice within this window (not a dedicated ability button).
 const DOUBLE_TAP_WINDOW := 0.35
@@ -90,6 +96,8 @@ func _apply_character_passives() -> void:
 			speed_level += 1
 		CharacterId.PYRO:
 			shield_charges += 1
+			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT tripled
+			powerup_chance_multiplier = 1.5  # 50% more total powerup chance
 		CharacterId.BOMB_KICKER:
 			move_duration *= 0.9
 			speed_level += 1
