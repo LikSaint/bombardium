@@ -174,7 +174,11 @@ func _refresh_selection() -> void:
 	for i in options.size():
 		var node: Control = get_node("MenuRow/" + options[i].capitalize())
 		node.modulate = Color(1, 1, 1, 1) if i == selected else Color(1, 1, 1, 0.45)
-		node.scale = Vector2(1.1, 1.1) if i == selected else Vector2(1, 1)
+		if i == selected:
+			node.scale = Vector2(1.1, 1.1)
+			node.pivot_offset = node.size / 2
+		else:
+			node.scale = Vector2(1, 1)
 
 func _activate(option: String) -> void:
 	match option:
