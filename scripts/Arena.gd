@@ -135,11 +135,12 @@ func destroy_block_at(cell: Vector2i, owner_player: Node = null) -> void:
 
 func _spawn_powerup(cell: Vector2i, owner_player: Node = null) -> void:
 	var powerup := PowerupScene.instantiate()
-	# Pyro has higher chance to spawn BOMB_COUNT when destroying blocks
-	if owner_player != null and owner_player.character_id == PlayerScript.CharacterId.PYRO and randf() < 0.5:
-		powerup.type = Consts.PowerupType.BOMB_COUNT
-	else:
-		powerup.type = randi() % 4
+	var powerup_type = randi() % 4
+	# Pyro: second chance with same probability to make it BOMB_COUNT
+	if owner_player != null and owner_player.character_id == PlayerScript.CharacterId.PYRO:
+		if randf() < Consts.powerup_chance_percent / 100.0:
+			powerup_type = Consts.PowerupType.BOMB_COUNT
+	powerup.type = powerup_type
 	powerup.position = cell_to_world(cell)
 	add_child(powerup)
 	powerups_by_cell[cell] = powerup
