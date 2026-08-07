@@ -104,14 +104,18 @@ func _input(event: InputEvent) -> void:
 				KEY_Q:
 					pickup_weapon()
 	else:
+		# Which physical button each of these is depends on the pad — see the
+		# face-button notes in PadInput.gd. A pad that reports its bottom button
+		# as JOY_BUTTON_B still gets the bomb on the button the player actually
+		# presses, because Pad learned it from their confirm press in the menus.
 		if event is InputEventJoypadButton and event.device == device_id and event.pressed:
-			match event.button_index:
-				JOY_BUTTON_A:
-					place_bomb()
-				JOY_BUTTON_B:
-					use_ability()
-				JOY_BUTTON_X:
-					pickup_weapon()
+			var button: int = event.button_index
+			if button == Pad.primary_button(device_id):
+				place_bomb()
+			elif button == Pad.ability_button(device_id):
+				use_ability()
+			elif button == Pad.pickup_button(device_id):
+				pickup_weapon()
 
 func _physics_process(delta: float) -> void:
 	if not alive:
@@ -140,8 +144,9 @@ func _poll_move_dir() -> Vector2i:
 		if Input.is_key_pressed(KEY_S):
 			y += 1
 	else:
-		x = Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X)
-		y = Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+		var stick := _joy_vector()
+		x = stick.x
+		y = stick.y
 
 	if abs(x) > abs(y):
 		if x > MOVE_DEADZONE:
@@ -166,13 +171,33 @@ func _held_dirs() -> Dictionary:
 		held[Consts.DIR_UP] = Input.is_key_pressed(KEY_W)
 		held[Consts.DIR_DOWN] = Input.is_key_pressed(KEY_S)
 	else:
-		var x := Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X)
-		var y := Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
-		held[Consts.DIR_LEFT] = x < -MOVE_DEADZONE
-		held[Consts.DIR_RIGHT] = x > MOVE_DEADZONE
-		held[Consts.DIR_UP] = y < -MOVE_DEADZONE
-		held[Consts.DIR_DOWN] = y > MOVE_DEADZONE
+		var stick := _joy_vector()
+		held[Consts.DIR_LEFT] = stick.x < -MOVE_DEADZONE
+		held[Consts.DIR_RIGHT] = stick.x > MOVE_DEADZONE
+		held[Consts.DIR_UP] = stick.y < -MOVE_DEADZONE
+		held[Consts.DIR_DOWN] = stick.y > MOVE_DEADZONE
 	return held
+
+## Left stick plus D-pad, folded into one deflection vector. The D-pad counts
+## because plenty of pads are usable only that way — a stick Godot has no
+## mapping for can land on axis indices JOY_AXIS_LEFT_X/Y don't cover, and some
+## pads have no usable stick at all. Pad's synthetic D-pad events (stick ->
+## D-pad, for menus) push in the same direction the stick already reports here,
+## so the two never fight.
+func _joy_vector() -> Vector2:
+	var v := Vector2(
+		Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
+		Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+	)
+	if Input.is_joy_button_pressed(device_id, JOY_BUTTON_DPAD_LEFT):
+		v.x -= 1.0
+	if Input.is_joy_button_pressed(device_id, JOY_BUTTON_DPAD_RIGHT):
+		v.x += 1.0
+	if Input.is_joy_button_pressed(device_id, JOY_BUTTON_DPAD_UP):
+		v.y -= 1.0
+	if Input.is_joy_button_pressed(device_id, JOY_BUTTON_DPAD_DOWN):
+		v.y += 1.0
+	return v
 
 ## Scout/Runner passive: pressing a direction twice quickly while a wooden
 ## block or a bomb sits directly ahead hops clean over it. Edge-tracking runs
@@ -464,7 +489,13 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 
 const PORTRAIT_REST_Y := -4.0
 
+var _move_tween: Tween
+
 func _move_to_cell(target_cell: Vector2i, duration: float) -> void:
+	# A shove can interrupt a step that's still animating; without killing the
+	# old tween the two would fight over `position` and land on the wrong cell.
+	if _move_tween != null and _move_tween.is_valid():
+		_move_tween.kill()
 	is_moving = true
 	$Portrait.set_walking(true, duration)
 	var tw := create_tween()
@@ -475,6 +506,7 @@ func _move_to_cell(target_cell: Vector2i, duration: float) -> void:
 		$Portrait.set_walking(false)
 		arena.try_collect_powerup(current_cell, self)
 	)
+	_move_tween = tw
 
 func _try_move(dir: Vector2i) -> void:
 	var target_cell := current_cell + dir
@@ -577,11 +609,60 @@ func die() -> void:
 		Sfx.play("shield_block")
 		_start_invulnerability()
 		return
+	_kill()
+
+func _kill() -> void:
 	alive = false
 	visible = false
 	Sfx.play("player_death")
 	GameManager.player_died(player_id)
 	died.emit(player_id)
+
+const SHOVE_DURATION := 0.12
+
+## A sudden-death wall landed on this player's cell: they take a hit (a shield
+## absorbs it like any other damage) and, if they live, get shoved out along
+## `push_dir` — the direction the wall front is travelling.
+##
+## The shove happens even while invulnerable, because the alternative is a
+## player left standing inside solid stone. Only when there is no free cell at
+## all in any direction is the crush unsurvivable.
+func crush(from_cell: Vector2i, push_dir: Vector2i) -> void:
+	if not alive:
+		return
+	die()
+	if not alive:
+		return
+	# `from_cell` is the walled cell, which is not necessarily current_cell:
+	# a player caught mid-step is counted by where they're drawn, and that's
+	# also where the shove has to start from.
+	current_cell = from_cell
+	var escape: Vector2i = _escape_cell(from_cell, push_dir)
+	if escape == INVALID_CELL:
+		_kill()
+		return
+	facing_dir = push_dir
+	_move_to_cell(escape, SHOVE_DURATION)
+
+const INVALID_CELL := Vector2i(-1, -1)
+
+# Prefers the push direction, then falls back to whichever remaining direction
+# leads further from the closing wall (i.e. nearer the middle of the arena).
+func _escape_cell(from_cell: Vector2i, push_dir: Vector2i) -> Vector2i:
+	var centre := Vector2(Consts.GRID_WIDTH, Consts.GRID_HEIGHT) / 2.0
+	var candidates: Array[Vector2i] = []
+	for dir in Consts.DIRECTIONS:
+		if dir != push_dir:
+			candidates.append(dir)
+	candidates.sort_custom(func(a, b):
+		return Vector2(from_cell + a).distance_to(centre) < Vector2(from_cell + b).distance_to(centre)
+	)
+	candidates.push_front(push_dir)
+	for dir in candidates:
+		var cell: Vector2i = from_cell + dir
+		if arena.is_walkable_for(cell, self):
+			return cell
+	return INVALID_CELL
 
 func _start_invulnerability() -> void:
 	is_invulnerable = true

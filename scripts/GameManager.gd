@@ -68,7 +68,7 @@ func _input(event: InputEvent) -> void:
 			return
 
 func _reconnect_device_of(event: InputEvent):
-	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A:
+	if Pad.is_confirm_button(event):
 		return event.device
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
 		return -1

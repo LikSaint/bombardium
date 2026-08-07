@@ -43,7 +43,7 @@ const STRINGS := {
 		"CYCLE_HINT": "%s — сменить",
 
 		"LOBBY_LEGEND": "%s — присоединиться, ещё раз — готов\n%s или %s — сменить персонажа",
-		"MAIN_HOTKEY_HINT": "Движение — WASD / стик   •   Бомба — Space / A   •   Способность — E / B\nПауза — Esc / Start",
+		"MAIN_HOTKEY_HINT": "Движение — WASD / стик   •   Бомба — Space / A   •   Способность — E / X\nПауза — Esc / Start",
 		"PAUSE_HOTKEY_HINT": "A/D или ◄► / стик — навигация   •   Space/A — выбрать   •   Esc/Start — закрыть",
 
 		"MAP_SETTINGS_TITLE": "Настройки матча",
@@ -55,7 +55,7 @@ const STRINGS := {
 		"SETTINGS_POWERUP_CHANCE": "Шанс бонусов",
 		"SETTINGS_ROUNDS": "Раундов в матче",
 		"SETTINGS_ON": "Вкл",
-		"MAP_SETTINGS_HINT": "▲▼ — раздел   •   ◄► — изменить   •   Space/A — подтвердить/войти в комнату   •   Esc — назад",
+		"MAP_SETTINGS_HINT": "▲▼ — раздел   •   ◄► — изменить   •   Space/A — подтвердить/войти в комнату   •   Esc/Start — назад",
 		"LOBBY_JOIN_HINT": "Чтобы подключиться, нажмите %s",
 		"SLOT_READY_HINT": "%s — чтобы стать готовым",
 		"MATCH_STARTING_IN": "Старт через: %d",
@@ -71,8 +71,9 @@ const STRINGS := {
 		"SETTINGS_TITLE": "Настройки",
 		"SETTINGS_LANGUAGE": "Язык",
 		"SETTINGS_SOUND": "Звук",
+		"SETTINGS_MUSIC": "Музыка",
 		"SETTINGS_OFF": "Выкл",
-		"SETTINGS_HINT": "W/S или ▲▼ — раздел   •   A/D или ◄► — изменить   •   Space/Esc — назад",
+		"SETTINGS_HINT": "W/S или ▲▼ — раздел   •   A/D или ◄► — изменить   •   Space/A или Esc/Start — назад",
 
 		"MENU_PLAY": "Играть",
 		"MENU_QUIT": "Выход",
@@ -104,7 +105,7 @@ const STRINGS := {
 		"CYCLE_HINT": "%s — change",
 
 		"LOBBY_LEGEND": "%s — join, press again — ready\n%s or %s — change character",
-		"MAIN_HOTKEY_HINT": "Move — WASD / stick   •   Bomb — Space / A   •   Ability — E / B\nPause — Esc / Start",
+		"MAIN_HOTKEY_HINT": "Move — WASD / stick   •   Bomb — Space / A   •   Ability — E / X\nPause — Esc / Start",
 		"PAUSE_HOTKEY_HINT": "A/D or ◄► / stick — navigate   •   Space/A — select   •   Esc/Start — close",
 
 		"MAP_SETTINGS_TITLE": "Match Settings",
@@ -116,7 +117,7 @@ const STRINGS := {
 		"SETTINGS_POWERUP_CHANCE": "Powerup chance",
 		"SETTINGS_ROUNDS": "Rounds per match",
 		"SETTINGS_ON": "On",
-		"MAP_SETTINGS_HINT": "▲▼ — section   •   ◄► — change   •   Space/A — confirm / enter room   •   Esc — back",
+		"MAP_SETTINGS_HINT": "▲▼ — section   •   ◄► — change   •   Space/A — confirm / enter room   •   Esc/Start — back",
 		"LOBBY_JOIN_HINT": "Press %s to join",
 		"SLOT_READY_HINT": "%s — to ready up",
 		"MATCH_STARTING_IN": "Starting in: %d",
@@ -132,8 +133,9 @@ const STRINGS := {
 		"SETTINGS_TITLE": "Settings",
 		"SETTINGS_LANGUAGE": "Language",
 		"SETTINGS_SOUND": "Sound",
+		"SETTINGS_MUSIC": "Music",
 		"SETTINGS_OFF": "Off",
-		"SETTINGS_HINT": "W/S or ▲▼ — section   •   A/D or ◄► — adjust   •   Space/Esc — back",
+		"SETTINGS_HINT": "W/S or ▲▼ — section   •   A/D or ◄► — adjust   •   Space/A or Esc/Start — back",
 
 		"MENU_PLAY": "Play",
 		"MENU_QUIT": "Quit",

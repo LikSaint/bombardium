@@ -184,6 +184,25 @@ func destroy_temp_wall_at(cell: Vector2i) -> void:
 	if temp_wall_nodes.has(cell):
 		temp_wall_nodes[cell].destroy()
 
+# Turns `cell` into permanent stone, clearing whatever was standing on it —
+# used by sudden death, which drops walls on the arena regardless of what's in
+# the way. A block is removed without its usual powerup roll (the wall would
+# just bury it anyway) and a bomb is set off rather than deleted, so its owner
+# gets the charge back instead of losing a bomb for the rest of the round.
+func seal_cell(cell: Vector2i) -> void:
+	if temp_wall_nodes.has(cell):
+		temp_wall_nodes[cell].destroy()
+	if blocks_by_cell.has(cell):
+		blocks_by_cell[cell].destroy()
+		blocks_by_cell.erase(cell)
+	if powerups_by_cell.has(cell):
+		powerups_by_cell[cell].queue_free()
+		powerups_by_cell.erase(cell)
+	if bombs_by_cell.has(cell):
+		bombs_by_cell[cell].explode()
+	cells[cell] = CellState.WALL
+	queue_redraw()
+
 func in_bounds(cell: Vector2i) -> bool:
 	return cell.x >= 0 and cell.x < Consts.GRID_WIDTH and cell.y >= 0 and cell.y < Consts.GRID_HEIGHT
 

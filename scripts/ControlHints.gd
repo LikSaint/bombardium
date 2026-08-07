@@ -23,8 +23,8 @@ const KEYBOARD_LABELS := {
 const XBOX_STYLE_LABELS := {
 	Action.MOVE: "◄►",
 	Action.BOMB: "A",
-	Action.ABILITY: "B",
-	Action.PICKUP: "X",
+	Action.ABILITY: "X",
+	Action.PICKUP: "B",
 	Action.CYCLE: "◄►",
 	Action.JOIN: "A",
 	Action.PAUSE: "Start",
@@ -33,14 +33,27 @@ const XBOX_STYLE_LABELS := {
 const PLAYSTATION_LABELS := {
 	Action.MOVE: "◄►",
 	Action.BOMB: "✕",
-	Action.ABILITY: "○",
-	Action.PICKUP: "□",
+	Action.ABILITY: "□",
+	Action.PICKUP: "○",
 	Action.CYCLE: "◄►",
 	Action.JOIN: "✕",
 	Action.PAUSE: "Start",
 }
 
-const PLAYSTATION_VENDOR_ID := 0x054C
+# Nintendo prints its face buttons in mirrored positions: the bottom button is
+# B (not A) and the left one is Y (not X). Godot's JOY_BUTTON_* names are
+# positional, so the *bindings* need no change here — only the printed glyphs
+# do, or a Switch player is told to press a button that sits on the far side
+# of the pad from the one that actually fires.
+const NINTENDO_LABELS := {
+	Action.MOVE: "◄►",
+	Action.BOMB: "B",
+	Action.ABILITY: "Y",
+	Action.PICKUP: "A",
+	Action.CYCLE: "◄►",
+	Action.JOIN: "B",
+	Action.PAUSE: "+",
+}
 
 ## Empty string for a bot or a currently-disconnected slot — neither has a
 ## real input device to describe.
@@ -55,11 +68,10 @@ func is_keyboard(device_id: int) -> bool:
 	return device_id == -1
 
 func _gamepad_labels(device_id: int) -> Dictionary:
-	return PLAYSTATION_LABELS if _is_playstation(device_id) else XBOX_STYLE_LABELS
-
-func _is_playstation(device_id: int) -> bool:
-	var info := Input.get_joy_info(device_id)
-	if info.get("vendor_id", 0) == PLAYSTATION_VENDOR_ID:
-		return true
-	var joy_name := Input.get_joy_name(device_id).to_lower()
-	return "sony" in joy_name or "playstation" in joy_name or "dualshock" in joy_name or "dualsense" in joy_name
+	match Pad.family(device_id):
+		Pad.Family.PLAYSTATION:
+			return PLAYSTATION_LABELS
+		Pad.Family.NINTENDO:
+			return NINTENDO_LABELS
+		_:
+			return XBOX_STYLE_LABELS

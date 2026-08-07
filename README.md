@@ -18,7 +18,7 @@ and other state as plain text, since icons alone weren't discoverable enough:
 
 - **Join / ready**: Space (keyboard) or A (gamepad) — a "+" slot becomes your character portrait;
   press again to toggle ready, which also prints "ГОТОВ" on the slot (not just the checkmark).
-- **Cycle character**: A/D (keyboard) or D-pad left/right (gamepad), only while not ready. Each
+- **Cycle character**: A/D (keyboard) or D-pad / left stick left-right (gamepad), only while not ready. Each
   joined slot shows a one-line blurb of that character's passive/ability underneath the portrait.
 - **Map size**: keyboard only, Up/Down — 5 bar-height presets, Крошечная (9x7) to Огромная (21x17).
 - **Add/remove bot**: keyboard only, B fills the next open slot with an AI-controlled bot (a random
@@ -30,11 +30,42 @@ and other state as plain text, since icons alone weren't discoverable enough:
   solo (exactly 1 slot, no one else) auto-fills a bot into the 2nd slot — a lone player can never
   become "the last survivor" on their own, so without this the round would just never end.
 
+Controller support (`scripts/PadInput.gd`, autoloaded as `Pad`) — the game reads joypads by device
+index rather than through the InputMap, so that four local pads can be told apart, which means it
+also has to absorb the differences between pad families itself:
+- **Left stick doubles as the D-pad.** Menus, the Lobby and the character dock all navigate on
+  `JOY_BUTTON_DPAD_*`; `Pad` watches each device's left stick and injects real D-pad press/release
+  events for that device when it crosses a deadzone. Unbranded pads with no entry in Godot's SDL
+  mapping database often report their D-pad as a raw hat that never becomes a `DPAD_*` event, and
+  some pads have no D-pad worth using — either way the stick now gets them through every screen.
+- **Button glyphs follow the pad.** Xbox/generic (A/B/X/Y), PlayStation (✕ ○ □), and Nintendo, which
+  prints its face buttons mirrored: Godot's `JOY_BUTTON_*` names are positional, so on a Switch pad
+  the bottom button that fires "A" actions is printed **B**, and the left one is **Y**. Only the
+  glyphs change, never the bindings. Detected by USB vendor id, falling back to the controller name
+  (`get_joy_info()` comes back empty on some platforms, notably macOS with the editor's embedded
+  game window).
+- **The primary button is learned, not assumed.** `JOY_BUTTON_A/B/X/Y` are *positional* names Godot
+  derives from the pad's SDL mapping — on a correct one, `JOY_BUTTON_A` is the bottom button
+  whatever the vendor printed there. Cheap PC pads break that in both directions: some carry no
+  mapping and report raw firmware indices, others carry a mapping that is wrong for the hardware or
+  sit in a DirectInput mode it was never written for, and their bottom button arrives as
+  `JOY_BUTTON_B`. Hardcoding `JOY_BUTTON_A` then puts every primary action on a button nobody is
+  pressing. So any face button confirms in menus, and whichever one a device first confirms with
+  (title screen, Lobby join, reconnect claim) becomes that device's primary from then on; ability
+  and pickup are placed at fixed offsets around the four-button cluster, wrapping so the three
+  in-match actions can never collide. A standard pad is unaffected — its first confirm is A, which
+  lands ability on X and pickup on B, exactly the old layout.
+- **`scenes/PadDebug.tscn`** is a dev-only inspector for when a pad still misbehaves: run it
+  directly (F6) and it shows each connected pad's name, GUID, `is_joy_known`, live held buttons and
+  axes, and a log of raw button indices as you press them. Which physical button is `JOY_BUTTON_A`
+  isn't answerable from code, so this is how you find out rather than guess — and what you'd need
+  to write a proper `Input.add_joy_mapping()` entry for that GUID.
+
 In-match:
-- Move: WASD or left stick — a proper 4-direction walk cycle (6 frames/direction), paced to each
+- Move: WASD, or left stick / D-pad — a proper 4-direction walk cycle (6 frames/direction), paced to each
   character's actual move speed; standing still shows the idle sprite for whichever way you're facing.
-- Bomb: Space / A. Ability: E / B. Pickup (stub, not yet implemented — intentionally left off every
-  hotkey legend below): Q / X.
+- Bomb: Space / A. Ability: E / X. Pickup (stub, not yet implemented — intentionally left off every
+  hotkey legend below): Q / B.
 - A hotkey hint (movement/bomb/ability/pause) shows at the top of the screen for the first 6s of
   each round, then fades out — it reappears every round since `Main` reloads the scene each time.
 - **Escape (keyboard) or Start (gamepad) opens the pause menu** — Resume / Restart match / Back to
@@ -68,7 +99,8 @@ In-match:
 - [x] 3. Rounds/score UI — 5s results overlay between rounds, 5-round match, match winner by score
 - [x] 4. Character roster + abilities — Bomb-Master, Scout, Engineer, Pyro, Bomb-Kicker (5 characters; brief listed 4, added a 5th per later request)
 - [~] 5. Powerups — bomb count/radius/speed/shield drop from blocks and sit on the ground until collected (bobbing icon, never destroyed by blasts); extra weapon *pickups* (mine/remote/fire bomb) not yet built
-- [~] 6. Art — AI-generated (PixelLab) pixel-art characters with walk animations, HUD/pickup icons, pause menu icons, blocks, walls, explosions, temp wall all done. No sound yet.
+- [~] 6. Art & audio — AI-generated (PixelLab) pixel-art characters with walk animations, HUD/pickup icons, pause menu icons, blocks, walls, explosions, temp wall all done. Procedural sound effects and two music loops are in; no voice/announcer.
+- [x] 7. Sudden death — a round that drags past 5 minutes gets walled in from the outside
 
 ## Characters
 
@@ -124,6 +156,63 @@ of characters/animations at once. `animate_character` in template mode queues on
 staggered. After adding/changing any PNG, Godot needs to (re)import it before a headless run can
 preload it — either open the project in the editor once, or run
 `godot --headless --editor --path . --quit`.
+
+## Audio
+
+Everything is synthesized offline into 16-bit PCM wavs — no licensed samples, no runtime synthesis.
+Two autoloads, deliberately kept apart so they can be balanced against each other:
+
+- `Sfx` (`scripts/Sfx.gd`) — short one-shots played through a round-robin pool of 8
+  `AudioStreamPlayer`s, so overlapping events (two bombs going off together) don't cut each other
+  off. `play(name, pitch, jitter)` adds a little random pitch spread by default, which keeps
+  repeated footsteps from sounding mechanical.
+- `Music` (`scripts/Music.gd`) — two looping themes, `Track.MENU` (calm, 96 BPM, 60s) for the main
+  menu and lobby and `Track.ARENA` (bouncy platformer march, 144 BPM, 53s) for matches, crossfaded
+  over 0.8s by `play_track()` so entering or leaving a match never cuts the audio mid-phrase.
+  Repeat calls for the track already playing are ignored, so main menu -> lobby doesn't restart it.
+  Runs with `PROCESS_MODE_ALWAYS` (pausing doesn't stop the music, and the crossfade tween still
+  advances) and stops outright at volume 0 instead of playing silently.
+
+Both tracks are note sequences — lead, bass, chords, and for the arena some light drums — written
+straight into a buffer, so a loop is seamless as long as note tails are wrapped modulo the buffer
+length; the tone shaping is done with FFT filters, which are circular and therefore also loop-safe.
+Everything is deliberately dull-edged (nothing meaningful above ~4 kHz) because the music plays
+under gameplay for a long time and shrill harmonics get tiring fast.
+
+Menus use a **single** sound, `assets/sfx/menu.wav`, for every interaction — move, confirm, back,
+join, ready — played at a fixed pitch with no jitter via `Sfx.play_menu()`. Distinct per-action
+menu sounds were tried first and made simply moving through a menu feel noisy; the selection
+highlight already says what happened, so the audio only needs to confirm that the input landed.
+
+Both volumes are 0..1, adjusted in 5 steps from the Settings panel (main menu and pause menu share
+the same three-row Language / Sound / Music layout) and persisted to `user://settings.cfg` next to
+the language setting — each writer re-loads the file before saving so it never clobbers the others'
+keys.
+
+## Sudden death
+
+A round that runs past 5 minutes starts closing in (`scripts/SuddenDeath.gd`, a node on `Main`).
+Permanent walls drop one at a time, clockwise from the top centre of the arena and spiralling
+inward, until the arena is sealed or someone is the last one standing.
+
+- **Telegraphed, not instant.** Each wall puts a ghost sprite on its cell that fades up over exactly
+  the current interval, then snaps to solid. The alpha curve is quadratic, so it lingers barely
+  visible and only becomes obvious right before it lands — at the start you get seconds of warning,
+  by the end it's a blink.
+- **Accelerating.** The interval shrinks geometrically from 3s to 0.28s across the whole spiral,
+  not linearly, so it opens gently and then rushes. Fully sealing a map takes ~34s (Tiny) to ~4min
+  (Huge); in practice rounds end well before that.
+- **Crushing.** A player standing where a wall lands takes a hit — a shield absorbs it exactly like
+  a blast — and is shoved one cell along the direction the wall front is travelling. With no shield
+  they die and simply vanish, like any other death. The shove happens even during post-shield
+  invulnerability, because the alternative is a player standing inside solid stone; if no adjacent
+  cell is free in any direction, the crush kills regardless of shields.
+- **Music leans on the gas.** `Music.set_pitch()` ramps to 1.12x in step with the wall rate. Pitch
+  and tempo move together, which is the point — it should read as the round getting frantic.
+
+`Arena.seal_cell()` clears whatever was on the cell: a block goes without its usual powerup roll
+(the wall would bury it anyway), a powerup is removed, and a bomb is *detonated* rather than
+deleted, so its owner gets the charge back instead of being down a bomb for the rest of the round.
 
 ## Architecture notes
 

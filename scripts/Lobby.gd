@@ -54,6 +54,7 @@ var countdown_active: bool = false
 @onready var countdown_label: Label = $RoomView/CountdownLabel
 
 func _ready() -> void:
+	Music.play_track(Music.Track.MENU)
 	Consts.set_map_size(Consts.map_size_index)
 	_refresh_map_size_bars()
 	_refresh_settings_texts()
@@ -106,22 +107,22 @@ func _refresh_map_size_bars() -> void:
 
 func _input_settings(event: InputEvent) -> void:
 	if _is_back(event):
-		Sfx.play("menu_back")
+		Sfx.play_menu()
 		get_tree().change_scene_to_file(MainMenuScenePath)
 	elif _is_row_prev(event):
 		settings_selected = (settings_selected - 1 + SETTINGS_ROW_COUNT) % SETTINGS_ROW_COUNT
 		_refresh_settings_selection()
-		Sfx.play("menu_move")
+		Sfx.play_menu()
 	elif _is_row_next(event):
 		settings_selected = (settings_selected + 1) % SETTINGS_ROW_COUNT
 		_refresh_settings_selection()
-		Sfx.play("menu_move")
+		Sfx.play_menu()
 	elif _is_value_left(event):
 		_adjust_setting(-1)
 	elif _is_value_right(event):
 		_adjust_setting(1)
 	elif _is_confirm(event) and settings_selected == SettingsRow.ROOM:
-		Sfx.play("menu_confirm")
+		Sfx.play_menu()
 		_enter_room()
 
 func _adjust_setting(delta: int) -> void:
@@ -144,7 +145,7 @@ func _adjust_setting(delta: int) -> void:
 		SettingsRow.ROUNDS:
 			Consts.set_rounds_index(Consts.rounds_index + delta)
 	_refresh_settings_texts()
-	Sfx.play("menu_move")
+	Sfx.play_menu()
 
 # Reconciles the live `slots` array against the configured player-slot cap
 # and bot count. Only called when those two settings actually changed (or on
@@ -208,7 +209,7 @@ func _input(event: InputEvent) -> void:
 
 func _input_room(event: InputEvent) -> void:
 	if _is_back(event):
-		Sfx.play("menu_back")
+		Sfx.play_menu()
 		_cancel_countdown()
 		_show_view("settings")
 		return
@@ -231,15 +232,18 @@ func _is_back(event: InputEvent) -> bool:
 		return true
 	return false
 
+# Arrow keys are not listed here (or in any other predicate): Pad republishes
+# them as their WASD twin, so matching both would move the selection twice per
+# press.
 func _is_row_prev(event: InputEvent) -> bool:
-	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_W or event.keycode == KEY_UP):
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_W:
 		return true
 	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_UP:
 		return true
 	return false
 
 func _is_row_next(event: InputEvent) -> bool:
-	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_S or event.keycode == KEY_DOWN):
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S:
 		return true
 	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_DOWN:
 		return true
@@ -262,9 +266,7 @@ func _is_value_right(event: InputEvent) -> bool:
 func _is_confirm(event: InputEvent) -> bool:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
 		return true
-	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A:
-		return true
-	return false
+	return Pad.is_confirm_button(event)
 
 func _device_of_event(event: InputEvent):
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -276,7 +278,7 @@ func _device_of_event(event: InputEvent):
 func _is_join_press(event: InputEvent, device: int) -> bool:
 	if device == -1:
 		return event.keycode == KEY_SPACE
-	return event.button_index == JOY_BUTTON_A
+	return Pad.is_confirm_button(event)
 
 func _is_left(event: InputEvent, device: int) -> bool:
 	if device == -1:
@@ -300,12 +302,11 @@ func _toggle_join_or_ready(device: int) -> void:
 		if slots.size() >= Consts.configured_player_slots:
 			return
 		slots.append({"device": device, "player_id": slots.size() + 1, "character_id": 0, "ready": false})
-		Sfx.play("player_join")
 	else:
 		slot["ready"] = not slot["ready"]
-		Sfx.play("menu_confirm" if slot["ready"] else "menu_move")
 		if not slot["ready"]:
 			_cancel_countdown()
+	Sfx.play_menu()
 	_refresh_slots_ui()
 	_maybe_start()
 
@@ -326,7 +327,7 @@ func _cycle_character(device: int, delta: int) -> void:
 	if slot.is_empty() or slot["ready"]:
 		return
 	slot["character_id"] = posmod(slot["character_id"] + delta, Consts.CHARACTER_COUNT)
-	Sfx.play("menu_move")
+	Sfx.play_menu()
 	_refresh_slots_ui()
 
 func _all_ready() -> bool:
@@ -340,16 +341,6 @@ func _all_ready() -> bool:
 func _maybe_start() -> void:
 	if countdown_active or not _all_ready():
 		return
-
-	# A single player alone can never become "the last survivor" (round_ended
-	# only fires once someone else has died) — auto-fill a bot opponent so a
-	# solo match is actually playable instead of running forever.
-	if slots.size() == 1 and slots.size() < Consts.configured_player_slots:
-		_append_bot_slot()
-		_refresh_slots_ui()
-		_maybe_start()
-		return
-
 	_start_countdown()
 
 func _start_countdown() -> void:

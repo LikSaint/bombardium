@@ -18,8 +18,10 @@ config/features=PackedStringArray("4.7")
 
 Consts="*res://scripts/Constants.gd"
 Loc="*res://scripts/Localization.gd"
+Pad="*res://scripts/PadInput.gd"
 Hints="*res://scripts/ControlHints.gd"
 Sfx="*res://scripts/Sfx.gd"
+Music="*res://scripts/Music.gd"
 GameManager="*res://scripts/GameManager.gd"
 
 [display]

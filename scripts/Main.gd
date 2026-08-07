@@ -5,6 +5,7 @@ const LobbyScenePath := "res://scenes/Lobby.tscn"
 
 @onready var arena: Node2D = $Arena
 @onready var camera: Camera2D = $Camera2D
+@onready var sudden_death: Node = $SuddenDeath
 @onready var overlay: ColorRect = $UI/Overlay
 @onready var results_label: Label = $UI/Overlay/ResultsLabel
 @onready var round_timer_label: Label = $UI/Overlay/RoundTimerLabel
@@ -21,11 +22,13 @@ func _ready() -> void:
 		# Scene opened directly (e.g. in the editor) instead of via the Lobby.
 		get_tree().change_scene_to_file.call_deferred(LobbyScenePath)
 		return
+	Music.play_track(Music.Track.ARENA)
 	arena.generate()
 	_fit_camera_to_arena()
 	get_viewport().size_changed.connect(_fit_camera_to_arena)
 	GameManager.round_ended.connect(_on_round_ended)
 	_spawn_players()
+	sudden_death.begin(arena)
 	_refresh_hotkey_hint()
 	Loc.language_changed.connect(_refresh_hotkey_hint)
 	_show_hotkey_hint()
