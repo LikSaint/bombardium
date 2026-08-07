@@ -130,16 +130,30 @@ func destroy_block_at(cell: Vector2i, owner_player: Node = null) -> void:
 	blocks_by_cell[cell].destroy()
 	blocks_by_cell.erase(cell)
 	cells[cell] = CellState.EMPTY
-	if randf() < Consts.powerup_chance_percent / 100.0:
-		_spawn_powerup(cell, owner_player)
 
-func _spawn_powerup(cell: Vector2i, owner_player: Node = null) -> void:
-	var powerup := PowerupScene.instantiate()
-	var powerup_type = randi() % 4
-	# Pyro: second chance with same probability to make it BOMB_COUNT
+	var powerup_type: int = -1
+
 	if owner_player != null and owner_player.character_id == PlayerScript.CharacterId.PYRO:
-		if randf() < Consts.powerup_chance_percent / 100.0:
+		# Pyro: 5% each for RADIUS/SPEED/SHIELD + 15% for BOMB_COUNT = 30% total
+		var roll = randf() * 100.0
+		if roll < 5.0:
+			powerup_type = Consts.PowerupType.RADIUS
+		elif roll < 10.0:
+			powerup_type = Consts.PowerupType.SPEED
+		elif roll < 15.0:
+			powerup_type = Consts.PowerupType.SHIELD
+		elif roll < 30.0:
 			powerup_type = Consts.PowerupType.BOMB_COUNT
+	else:
+		# Normal: map setting chance, then random type
+		if randf() < Consts.powerup_chance_percent / 100.0:
+			powerup_type = randi() % 4
+
+	if powerup_type >= 0:
+		_spawn_powerup(cell, powerup_type)
+
+func _spawn_powerup(cell: Vector2i, powerup_type: int) -> void:
+	var powerup := PowerupScene.instantiate()
 	powerup.type = powerup_type
 	powerup.position = cell_to_world(cell)
 	add_child(powerup)
