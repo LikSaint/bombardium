@@ -255,7 +255,6 @@ func get_character_stats(character_id: int) -> Dictionary:
 	match character_id:
 		0:  # Sapper
 			stats["bombs"] = 2
-			stats["radius"] = 2
 			stats["shield"] = 1
 		1:  # Runner
 			stats["speed"] = 2

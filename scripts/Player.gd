@@ -150,11 +150,9 @@ func _ready() -> void:
 func _apply_character_passives() -> void:
 	match character_id:
 		CharacterId.BOMB_MASTER:
-			bomb_radius += 1
 			bomb_count_max += 1
 			bomb_count_current = bomb_count_max
 			bomb_level += 1
-			radius_level += 1
 			shield_charges += 1
 			# BOMB_COUNT: the trigger sets off every bomb at once, so bombs are
 			# what scales the Sapper — three at a time is a shaped minefield,
