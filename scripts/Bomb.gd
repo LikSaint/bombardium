@@ -62,16 +62,19 @@ const REMOTE_FUSE_DURATION := 8.0
 ## MINE_ARM_DELAY keeps a freshly planted mine from going off in the face of an
 ## opponent already standing there.
 ##
-## MINE_TRIP_DELAY is the tell, and it is the difference between a trap and a
-## coin flip. It is set against how far a player actually travels rather than by
-## feel: base move_duration is 0.3s per cell, and escaping a mine of radius 1
-## means clearing two cells from its centre. At 0.3s the tell bought exactly one
-## cell, so tripping one was death for anybody who was not already leaving —
-## there was nothing to react with. At 0.45s it buys a cell and a half, which
-## lets someone who clipped the edge of the footprint get out and still catches
-## anyone who walked into the middle of it.
+## MINE_TRIP_DELAY is the tell between tripping a mine and wearing it. The scale
+## to read it against is distance travelled, not seconds: base move_duration is
+## 0.3s per cell, and clearing a radius-1 mine means getting two cells from its
+## centre. So this buys a little under one cell — walking into a mine is meant
+## to be something you pay for, and only somebody already on their way out the
+## far side gets to keep the charge they were carrying.
+##
+## It has been as high as 0.45 (a cell and a half), which let anyone who clipped
+## the edge of the footprint stroll clear and made mines read as a suggestion.
+## If they now feel unfair rather than punishing, this is the single number to
+## move; the strobe below re-times itself to whatever it is set to.
 const MINE_ARM_DELAY := 0.6
-const MINE_TRIP_DELAY := 0.45
+const MINE_TRIP_DELAY := 0.25
 
 signal exploded
 
@@ -512,7 +515,10 @@ func _draw_mine() -> void:
 	var tripped := _mine_trip_left >= 0.0
 	var armed := _mine_age >= MINE_ARM_DELAY
 	var tint := MINE_TRIP_COLOR if tripped else MINE_IDLE_COLOR
-	var strobe := tripped and fmod(_mine_trip_left, 0.1) < 0.05
+	# Three on/off cycles across the window whatever MINE_TRIP_DELAY is set to,
+	# rather than a fixed 10Hz that would show two blinks at one value and six at
+	# another. The count is the part that reads; the rate follows from it.
+	var strobe := tripped and fmod(_mine_trip_left, MINE_TRIP_DELAY / 3.0) < MINE_TRIP_DELAY / 6.0
 
 	var footprint_alpha := 0.34 if strobe else (0.20 if tripped else (0.15 if armed else 0.06))
 	for c in _blast_cells():
