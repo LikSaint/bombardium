@@ -76,7 +76,7 @@ func _explode_cross() -> void:
 			_spawn_explosion(c)
 			_trigger_chain_at(c)
 			if arena.is_block(c):
-				arena.destroy_block_at(c)
+				arena.destroy_block_at(c, owner_player)
 				break
 
 func _explode_circle() -> void:
@@ -100,7 +100,7 @@ func _explode_circle() -> void:
 			if arena.is_temp_wall(c):
 				arena.destroy_temp_wall_at(c)
 			elif arena.is_block(c):
-				arena.destroy_block_at(c)
+				arena.destroy_block_at(c, owner_player)
 			else:
 				_trigger_chain_at(c)
 

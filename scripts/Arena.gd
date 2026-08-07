@@ -124,18 +124,22 @@ func _place_block(cell: Vector2i) -> void:
 	blocks_by_cell[cell] = block
 	cells[cell] = CellState.BLOCK
 
-func destroy_block_at(cell: Vector2i) -> void:
+func destroy_block_at(cell: Vector2i, owner_player: Node = null) -> void:
 	if not blocks_by_cell.has(cell):
 		return
 	blocks_by_cell[cell].destroy()
 	blocks_by_cell.erase(cell)
 	cells[cell] = CellState.EMPTY
 	if randf() < Consts.powerup_chance_percent / 100.0:
-		_spawn_powerup(cell)
+		_spawn_powerup(cell, owner_player)
 
-func _spawn_powerup(cell: Vector2i) -> void:
+func _spawn_powerup(cell: Vector2i, owner_player: Node = null) -> void:
 	var powerup := PowerupScene.instantiate()
-	powerup.type = randi() % 4
+	# Pyro has higher chance to spawn BOMB_COUNT when destroying blocks
+	if owner_player != null and owner_player.character_id == PlayerScript.CharacterId.PYRO and randf() < 0.5:
+		powerup.type = Consts.PowerupType.BOMB_COUNT
+	else:
+		powerup.type = randi() % 4
 	powerup.position = cell_to_world(cell)
 	add_child(powerup)
 	powerups_by_cell[cell] = powerup
@@ -148,9 +152,6 @@ func try_collect_powerup(cell: Vector2i, player: Node) -> void:
 	if not powerups_by_cell.has(cell):
 		return
 	var type: int = powerups_by_cell[cell].type
-	# Pyro has a 50% chance to convert any powerup to BOMB_COUNT
-	if player.character_id == PlayerScript.CharacterId.PYRO and randf() < 0.5:
-		type = Consts.PowerupType.BOMB_COUNT
 	powerups_by_cell[cell].queue_free()
 	powerups_by_cell.erase(cell)
 	Sfx.play("powerup_pickup")
