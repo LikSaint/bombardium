@@ -42,9 +42,23 @@ const STRINGS := {
 		"DISCONNECTED_HINT": "Отключено…",
 		"CYCLE_HINT": "%s — сменить",
 
-		"LOBBY_LEGEND": "%s — присоединиться, ещё раз — готов\n%s или %s — сменить персонажа   •   ↑/↓ — размер карты\nB — добавить бота   •   N — убрать бота",
+		"LOBBY_LEGEND": "%s — присоединиться, ещё раз — готов\n%s или %s — сменить персонажа",
 		"MAIN_HOTKEY_HINT": "Движение — WASD / стик   •   Бомба — Space / A   •   Способность — E / B\nПауза — Esc / Start",
 		"PAUSE_HOTKEY_HINT": "A/D или ◄► / стик — навигация   •   Space/A — выбрать   •   Esc/Start — закрыть",
+
+		"MAP_SETTINGS_TITLE": "Настройки матча",
+		"ROOM_ITEM": "Комната",
+		"SETTINGS_MAP_SIZE": "Размер карты",
+		"SETTINGS_PLAYER_SLOTS": "Слоты игроков",
+		"SETTINGS_BOTS": "Боты",
+		"SETTINGS_RANDOM_WALLS": "Случайные стены",
+		"SETTINGS_POWERUP_CHANCE": "Шанс бонусов",
+		"SETTINGS_ROUNDS": "Раундов в матче",
+		"SETTINGS_ON": "Вкл",
+		"MAP_SETTINGS_HINT": "▲▼ — раздел   •   ◄► — изменить   •   Space/A — подтвердить/войти в комнату   •   Esc — назад",
+		"LOBBY_JOIN_HINT": "Чтобы подключиться, нажмите %s",
+		"SLOT_READY_HINT": "%s — чтобы стать готовым",
+		"MATCH_STARTING_IN": "Старт через: %d",
 
 		"MATCH_OVER": "Матч завершён!",
 		"MATCH_WINNER": "Победитель матча: Player %d",
@@ -89,9 +103,23 @@ const STRINGS := {
 		"DISCONNECTED_HINT": "Disconnected…",
 		"CYCLE_HINT": "%s — change",
 
-		"LOBBY_LEGEND": "%s — join, press again — ready\n%s or %s — change character   •   Up/Down — map size\nB — add a bot   •   N — remove a bot",
+		"LOBBY_LEGEND": "%s — join, press again — ready\n%s or %s — change character",
 		"MAIN_HOTKEY_HINT": "Move — WASD / stick   •   Bomb — Space / A   •   Ability — E / B\nPause — Esc / Start",
 		"PAUSE_HOTKEY_HINT": "A/D or ◄► / stick — navigate   •   Space/A — select   •   Esc/Start — close",
+
+		"MAP_SETTINGS_TITLE": "Match Settings",
+		"ROOM_ITEM": "Room",
+		"SETTINGS_MAP_SIZE": "Map size",
+		"SETTINGS_PLAYER_SLOTS": "Player slots",
+		"SETTINGS_BOTS": "Bots",
+		"SETTINGS_RANDOM_WALLS": "Random walls",
+		"SETTINGS_POWERUP_CHANCE": "Powerup chance",
+		"SETTINGS_ROUNDS": "Rounds per match",
+		"SETTINGS_ON": "On",
+		"MAP_SETTINGS_HINT": "▲▼ — section   •   ◄► — change   •   Space/A — confirm / enter room   •   Esc — back",
+		"LOBBY_JOIN_HINT": "Press %s to join",
+		"SLOT_READY_HINT": "%s — to ready up",
+		"MATCH_STARTING_IN": "Starting in: %d",
 
 		"MATCH_OVER": "Match over!",
 		"MATCH_WINNER": "Match winner: Player %d",
@@ -144,10 +172,17 @@ func flag(for_lang: String = "") -> String:
 
 func _load_saved_language() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(SETTINGS_PATH) == OK:
+	if cfg.load(SETTINGS_PATH) == OK and cfg.has_section_key("settings", "language"):
 		lang = cfg.get_value("settings", "language", DEFAULT_LANG)
 	else:
-		lang = DEFAULT_LANG
+		lang = _detect_system_language()
+
+# No explicit choice saved yet (first launch, or a settings.cfg written only
+# by Sfx before the player ever touched Language) - fall back to the OS
+# locale instead of always booting in English.
+func _detect_system_language() -> String:
+	var system_lang := OS.get_locale_language()
+	return system_lang if AVAILABLE_LANGS.has(system_lang) else DEFAULT_LANG
 
 func _save_language() -> void:
 	var cfg := ConfigFile.new()

@@ -17,6 +17,9 @@ func _ready() -> void:
 	blink.parallel().tween_property($ArrowRight, "modulate:a", 0.25, 0.5)
 	blink.tween_property($ArrowLeft, "modulate:a", 1.0, 0.5)
 	blink.parallel().tween_property($ArrowRight, "modulate:a", 1.0, 0.5)
+	var ready_blink := create_tween().set_loops()
+	ready_blink.tween_property($ReadyHint, "modulate:a", 0.2, 0.5)
+	ready_blink.tween_property($ReadyHint, "modulate:a", 1.0, 0.5)
 	Loc.language_changed.connect(_on_language_changed)
 
 func _on_language_changed() -> void:
@@ -37,6 +40,7 @@ func show_empty() -> void:
 	$Stats.visible = false
 	$AbilityLabel.visible = false
 	$ReadyLabel.visible = false
+	$ReadyHint.visible = false
 
 func show_joined(player_index: int, character_id: int, is_ready: bool, is_bot: bool = false, device_id: int = -1) -> void:
 	_is_empty = false
@@ -62,6 +66,8 @@ func show_joined(player_index: int, character_id: int, is_ready: bool, is_bot: b
 	$AbilityLabel.text = Consts.character_ability_desc(character_id, device_id)
 	$ReadyLabel.visible = is_ready
 	$ReadyLabel.text = Loc.t("READY")
+	$ReadyHint.visible = not is_ready and not is_bot
+	$ReadyHint.text = Loc.t("SLOT_READY_HINT", [Hints.label(device_id, Hints.Action.JOIN)])
 
 func _show_character_stats(character_id: int) -> void:
 	var stats = Consts.get_character_stats(character_id)

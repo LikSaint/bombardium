@@ -27,6 +27,48 @@ func set_map_size(index: int) -> void:
 	GRID_WIDTH = MAP_SIZES[map_size_index]["width"]
 	GRID_HEIGHT = MAP_SIZES[map_size_index]["height"]
 
+# --- Pre-match settings, configured on the Lobby's Settings screen ---------
+
+const PLAYER_SLOTS_MIN := 1
+const PLAYER_SLOTS_MAX := MAX_PLAYERS
+var configured_player_slots: int = MAX_PLAYERS
+
+const BOTS_MIN := 0
+var configured_bots: int = 0
+
+func set_configured_player_slots(value: int) -> void:
+	configured_player_slots = clampi(value, PLAYER_SLOTS_MIN, PLAYER_SLOTS_MAX)
+	configured_bots = clampi(configured_bots, BOTS_MIN, configured_player_slots)
+
+# Bots can never exceed the player-slot count: adding a bot fills one of the
+# match's slots exactly like a joining human would.
+func set_configured_bots(value: int) -> void:
+	configured_bots = clampi(value, BOTS_MIN, configured_player_slots)
+
+var random_indestructible_walls: bool = false
+
+func set_random_indestructible_walls(value: bool) -> void:
+	random_indestructible_walls = value
+
+const POWERUP_CHANCE_MIN := 0
+const POWERUP_CHANCE_MAX := 100
+const POWERUP_CHANCE_STEP := 5
+const DEFAULT_POWERUP_CHANCE_PERCENT := 20
+var powerup_chance_percent: int = DEFAULT_POWERUP_CHANCE_PERCENT
+
+func set_powerup_chance_percent(value: int) -> void:
+	powerup_chance_percent = clampi(value, POWERUP_CHANCE_MIN, POWERUP_CHANCE_MAX)
+
+const ROUNDS_OPTIONS := [3, 5, 7, 9]
+const DEFAULT_ROUNDS_INDEX := 1 # ROUNDS_OPTIONS[1] == 5, matches the old fixed value
+var rounds_index: int = DEFAULT_ROUNDS_INDEX
+
+func rounds_per_match() -> int:
+	return ROUNDS_OPTIONS[rounds_index]
+
+func set_rounds_index(index: int) -> void:
+	rounds_index = clampi(index, 0, ROUNDS_OPTIONS.size() - 1)
+
 const DIR_UP := Vector2i(0, -1)
 const DIR_DOWN := Vector2i(0, 1)
 const DIR_LEFT := Vector2i(-1, 0)

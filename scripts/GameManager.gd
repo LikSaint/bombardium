@@ -5,7 +5,10 @@ signal round_ended(winner_id: int)
 signal player_disconnected(player_id: int)
 signal player_reconnected(player_id: int, device: int)
 
-const ROUNDS_PER_MATCH := 5
+# How many rounds a match runs for. Captured from Consts.rounds_per_match()
+# when the match starts (reset_match) so it can't shift mid-match even if the
+# Lobby's Settings screen is revisited later (e.g. after a "menu" exit).
+var rounds_per_match: int = 5
 
 # Set once by the Lobby, then persists across round reloads within a match.
 # Each entry: {id: int, device: int, character_id: int}. A dead player can
@@ -104,7 +107,7 @@ func _check_round_end() -> void:
 		round_ended.emit(-1)
 
 func is_match_over() -> bool:
-	return round_number >= ROUNDS_PER_MATCH
+	return round_number >= rounds_per_match
 
 func get_match_winner() -> int:
 	var best_id := -1
@@ -118,6 +121,7 @@ func get_match_winner() -> int:
 func reset_match() -> void:
 	round_number = 0
 	scores.clear()
+	rounds_per_match = Consts.rounds_per_match()
 
 func leave_to_lobby() -> void:
 	player_slots = []

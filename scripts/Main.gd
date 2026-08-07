@@ -23,6 +23,7 @@ func _ready() -> void:
 		return
 	arena.generate()
 	_fit_camera_to_arena()
+	get_viewport().size_changed.connect(_fit_camera_to_arena)
 	GameManager.round_ended.connect(_on_round_ended)
 	_spawn_players()
 	_refresh_hotkey_hint()
@@ -73,10 +74,10 @@ func _on_round_ended(winner_id: int) -> void:
 		lines.append(Loc.t("MATCH_WINNER", [GameManager.get_match_winner()]))
 		Sfx.play("match_win")
 	elif winner_id == -1:
-		lines.append(Loc.t("ROUND_DRAW", [GameManager.round_number, GameManager.ROUNDS_PER_MATCH]))
+		lines.append(Loc.t("ROUND_DRAW", [GameManager.round_number, GameManager.rounds_per_match]))
 		Sfx.play("round_draw")
 	else:
-		lines.append(Loc.t("ROUND_WINNER", [GameManager.round_number, GameManager.ROUNDS_PER_MATCH, winner_id]))
+		lines.append(Loc.t("ROUND_WINNER", [GameManager.round_number, GameManager.rounds_per_match, winner_id]))
 		Sfx.play("round_win")
 
 	lines.append("")

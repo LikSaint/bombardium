@@ -36,15 +36,31 @@ func _refresh_settings_texts() -> void:
 	$SettingsPanel/LanguageRow/LanguageLabel.text = Loc.t("SETTINGS_LANGUAGE") + ":"
 	$SettingsPanel/LanguageRow/LanguageValue.text = "%s %s" % [Loc.native_name(), Loc.flag()]
 	$SettingsPanel/SoundRow/SoundLabel.text = Loc.t("SETTINGS_SOUND") + ":"
-	$SettingsPanel/SoundRow/SoundValue.text = _sound_value_text()
+	$SettingsPanel/SoundRow/SoundValue.text = _sound_value_bbcode()
 	_refresh_settings_selection()
 	if in_settings:
 		$HotkeyHint.text = Loc.t("SETTINGS_HINT")
 
-func _sound_value_text() -> String:
-	if Sfx.volume <= 0.0:
-		return Loc.t("SETTINGS_OFF")
-	return "%d%%" % Sfx.volume_percent()
+# Renders volume as 5 stepped bars (empty bars = muted), matching the
+# Language row's "label left, value right" table layout.
+const SOUND_GRADE_STEPS := 5
+const SOUND_BAR_FILLED := "▮"
+const SOUND_BAR_EMPTY := "▯"
+
+func _sound_grade() -> int:
+	return (Sfx.volume_percent() + 19) / (100 / SOUND_GRADE_STEPS)
+
+func _sound_value_bbcode() -> String:
+	var grade := _sound_grade()
+	var bars := ""
+	for i in SOUND_GRADE_STEPS:
+		if i < grade:
+			bars += "[color=#ffffff]%s[/color]" % SOUND_BAR_FILLED
+		else:
+			bars += "[color=#ffffff40]%s[/color]" % SOUND_BAR_EMPTY
+	if grade == 0:
+		bars += "  " + Loc.t("SETTINGS_OFF")
+	return bars
 
 func _refresh_settings_selection() -> void:
 	var rows: Array = [$SettingsPanel/LanguageRow, $SettingsPanel/SoundRow]

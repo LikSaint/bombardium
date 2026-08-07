@@ -2,22 +2,37 @@
 
 [ext_resource type="Script" uid="uid://dmc2i3p23vn6u" path="res://scripts/Lobby.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/LobbySlot.tscn" id="2"]
-[ext_resource type="PackedScene" path="res://scenes/PauseMenu.tscn" id="3"]
 
-[node name="Lobby" type="Control" unique_id=1894759678]
+[sub_resource type="StyleBoxFlat" id="RoomButtonStyle"]
+bg_color = Color(0.26, 0.17, 0.06, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1.0, 0.65, 0.2, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
+content_margin_left = 16.0
+content_margin_top = 8.0
+content_margin_right = 16.0
+content_margin_bottom = 8.0
+
+[node name="Lobby" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1")
 
-[node name="Background" type="ColorRect" parent="." unique_id=586286026]
+[node name="Background" type="ColorRect" parent="."]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 color = Color(0.08, 0.09, 0.11, 1)
 
-[node name="Title" type="Label" parent="." unique_id=196087366]
+[node name="Title" type="Label" parent="."]
 layout_mode = 0
 anchor_right = 1.0
 offset_top = 20.0
@@ -26,55 +41,281 @@ theme_override_font_sizes/font_size = 34
 text = "BOMBARDIUM"
 horizontal_alignment = 1
 
-[node name="MapSizeRow" type="Control" parent="." unique_id=1971294503]
-anchors_preset = 0
+[node name="SettingsPanel" type="Control" parent="."]
+layout_mode = 0
 anchor_left = 0.5
 anchor_right = 0.5
-offset_left = -110.0
-offset_top = 84.0
-offset_right = 110.0
-offset_bottom = 148.0
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_right = 260.0
+offset_top = -210.0
+offset_bottom = 210.0
 
-[node name="Bar0" type="ColorRect" parent="MapSizeRow" unique_id=1118576469]
+[node name="Subtitle" type="Label" parent="SettingsPanel"]
 layout_mode = 0
-offset_top = 50.0
-offset_right = 26.0
-offset_bottom = 64.0
+anchor_right = 1.0
+offset_bottom = 26.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+
+[node name="Rows" type="VBoxContainer" parent="SettingsPanel"]
+layout_mode = 0
+anchor_right = 1.0
+offset_top = 44.0
+offset_bottom = 360.0
+theme_override_constants/separation = 14
+
+[node name="RoomRow" type="PanelContainer" parent="SettingsPanel/Rows"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_styles/panel = SubResource("RoomButtonStyle")
+
+[node name="Label" type="Label" parent="SettingsPanel/Rows/RoomRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 24
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="MapSizeRow" type="HBoxContainer" parent="SettingsPanel/Rows"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 30)
+theme_override_constants/separation = 14
+
+[node name="Label" type="Label" parent="SettingsPanel/Rows/MapSizeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 1)
+vertical_alignment = 1
+
+[node name="Bars" type="HBoxContainer" parent="SettingsPanel/Rows/MapSizeRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 4
+alignment = 2
+
+[node name="Bar0" type="ColorRect" parent="SettingsPanel/Rows/MapSizeRow/Bars"]
+layout_mode = 2
+size_flags_vertical = 8
+custom_minimum_size = Vector2(16, 14)
 color = Color(0.3, 0.3, 0.36, 1)
 
-[node name="Bar1" type="ColorRect" parent="MapSizeRow" unique_id=1209228369]
-layout_mode = 0
-offset_left = 42.0
-offset_top = 42.0
-offset_right = 68.0
-offset_bottom = 64.0
+[node name="Bar1" type="ColorRect" parent="SettingsPanel/Rows/MapSizeRow/Bars"]
+layout_mode = 2
+size_flags_vertical = 8
+custom_minimum_size = Vector2(16, 22)
 color = Color(0.3, 0.3, 0.36, 1)
 
-[node name="Bar2" type="ColorRect" parent="MapSizeRow" unique_id=2127636088]
-layout_mode = 0
-offset_left = 84.0
-offset_top = 34.0
-offset_right = 110.0
-offset_bottom = 64.0
+[node name="Bar2" type="ColorRect" parent="SettingsPanel/Rows/MapSizeRow/Bars"]
+layout_mode = 2
+size_flags_vertical = 8
+custom_minimum_size = Vector2(16, 30)
 color = Color(0.3, 0.3, 0.36, 1)
 
-[node name="Bar3" type="ColorRect" parent="MapSizeRow" unique_id=1701096567]
-layout_mode = 0
-offset_left = 126.0
-offset_top = 24.0
-offset_right = 152.0
-offset_bottom = 64.0
+[node name="Bar3" type="ColorRect" parent="SettingsPanel/Rows/MapSizeRow/Bars"]
+layout_mode = 2
+size_flags_vertical = 8
+custom_minimum_size = Vector2(16, 40)
 color = Color(0.3, 0.3, 0.36, 1)
 
-[node name="Bar4" type="ColorRect" parent="MapSizeRow" unique_id=1969513878]
-layout_mode = 0
-offset_left = 168.0
-offset_top = 12.0
-offset_right = 194.0
-offset_bottom = 64.0
+[node name="Bar4" type="ColorRect" parent="SettingsPanel/Rows/MapSizeRow/Bars"]
+layout_mode = 2
+size_flags_vertical = 8
+custom_minimum_size = Vector2(16, 52)
 color = Color(0.3, 0.3, 0.36, 1)
 
-[node name="Slots" type="HBoxContainer" parent="." unique_id=952519295]
+[node name="PlayerSlotsRow" type="HBoxContainer" parent="SettingsPanel/Rows"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 30)
+theme_override_constants/separation = 14
+
+[node name="Label" type="Label" parent="SettingsPanel/Rows/PlayerSlotsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 1)
+vertical_alignment = 1
+
+[node name="ArrowLeft" type="Label" parent="SettingsPanel/Rows/PlayerSlotsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "◄"
+
+[node name="Value" type="Label" parent="SettingsPanel/Rows/PlayerSlotsRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(70, 0)
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ArrowRight" type="Label" parent="SettingsPanel/Rows/PlayerSlotsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "►"
+
+[node name="BotsRow" type="HBoxContainer" parent="SettingsPanel/Rows"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 30)
+theme_override_constants/separation = 14
+
+[node name="Label" type="Label" parent="SettingsPanel/Rows/BotsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 1)
+vertical_alignment = 1
+
+[node name="ArrowLeft" type="Label" parent="SettingsPanel/Rows/BotsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "◄"
+
+[node name="Value" type="Label" parent="SettingsPanel/Rows/BotsRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(70, 0)
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ArrowRight" type="Label" parent="SettingsPanel/Rows/BotsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "►"
+
+[node name="RandomWallsRow" type="HBoxContainer" parent="SettingsPanel/Rows"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 30)
+theme_override_constants/separation = 14
+
+[node name="Label" type="Label" parent="SettingsPanel/Rows/RandomWallsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 1)
+vertical_alignment = 1
+
+[node name="ArrowLeft" type="Label" parent="SettingsPanel/Rows/RandomWallsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "◄"
+
+[node name="Value" type="Label" parent="SettingsPanel/Rows/RandomWallsRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(70, 0)
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ArrowRight" type="Label" parent="SettingsPanel/Rows/RandomWallsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "►"
+
+[node name="PowerupChanceRow" type="HBoxContainer" parent="SettingsPanel/Rows"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 30)
+theme_override_constants/separation = 14
+
+[node name="Label" type="Label" parent="SettingsPanel/Rows/PowerupChanceRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 1)
+vertical_alignment = 1
+
+[node name="ArrowLeft" type="Label" parent="SettingsPanel/Rows/PowerupChanceRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "◄"
+
+[node name="Value" type="Label" parent="SettingsPanel/Rows/PowerupChanceRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(70, 0)
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ArrowRight" type="Label" parent="SettingsPanel/Rows/PowerupChanceRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "►"
+
+[node name="RoundsRow" type="HBoxContainer" parent="SettingsPanel/Rows"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 30)
+theme_override_constants/separation = 14
+
+[node name="Label" type="Label" parent="SettingsPanel/Rows/RoundsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.85, 0.87, 0.92, 1)
+vertical_alignment = 1
+
+[node name="ArrowLeft" type="Label" parent="SettingsPanel/Rows/RoundsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "◄"
+
+[node name="Value" type="Label" parent="SettingsPanel/Rows/RoundsRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(70, 0)
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ArrowRight" type="Label" parent="SettingsPanel/Rows/RoundsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 1, 1, 0.85)
+vertical_alignment = 1
+text = "►"
+
+[node name="Hint" type="Label" parent="SettingsPanel"]
+layout_mode = 0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -30.0
+offset_bottom = -4.0
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.7, 0.72, 0.8, 0.85)
+horizontal_alignment = 1
+
+[node name="RoomView" type="Control" parent="."]
+visible = false
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Slots" type="HBoxContainer" parent="RoomView"]
 layout_mode = 0
 anchor_left = 0.5
 anchor_top = 0.5
@@ -87,19 +328,45 @@ offset_bottom = 150.0
 theme_override_constants/separation = 20
 alignment = 1
 
-[node name="Slot1" parent="Slots" unique_id=320841211 instance=ExtResource("2")]
+[node name="Slot1" parent="RoomView/Slots" instance=ExtResource("2")]
 layout_mode = 2
 
-[node name="Slot2" parent="Slots" unique_id=424210774 instance=ExtResource("2")]
+[node name="Slot2" parent="RoomView/Slots" instance=ExtResource("2")]
 layout_mode = 2
 
-[node name="Slot3" parent="Slots" unique_id=788646098 instance=ExtResource("2")]
+[node name="Slot3" parent="RoomView/Slots" instance=ExtResource("2")]
 layout_mode = 2
 
-[node name="Slot4" parent="Slots" unique_id=1713849515 instance=ExtResource("2")]
+[node name="Slot4" parent="RoomView/Slots" instance=ExtResource("2")]
 layout_mode = 2
 
-[node name="HotkeyLegend" type="Label" parent="." unique_id=1343570647]
+[node name="CountdownLabel" type="Label" parent="RoomView"]
+visible = false
+layout_mode = 0
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_right = 150.0
+offset_top = -196.0
+offset_bottom = -160.0
+theme_override_font_sizes/font_size = 26
+theme_override_colors/font_color = Color(1, 0.85, 0.2, 1)
+horizontal_alignment = 1
+
+[node name="JoinHint" type="Label" parent="RoomView"]
+layout_mode = 0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -112.0
+offset_bottom = -88.0
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 0.95)
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+
+[node name="HotkeyLegend" type="Label" parent="RoomView"]
 layout_mode = 0
 anchor_top = 1.0
 anchor_right = 1.0
@@ -108,10 +375,4 @@ offset_top = -84.0
 offset_bottom = -8.0
 theme_override_colors/font_color = Color(0.7, 0.72, 0.8, 0.9)
 theme_override_font_sizes/font_size = 15
-text = "Пробел / A — присоединиться, ещё раз — готов
-A/D или ◄► — сменить персонажа   •   ↑/↓ — размер карты
-B — добавить бота   •   N — убрать бота"
 horizontal_alignment = 1
-
-[node name="PauseMenu" parent="." unique_id=1116855701 instance=ExtResource("3")]
-include_restart = false

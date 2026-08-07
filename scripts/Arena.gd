@@ -10,8 +10,11 @@ const WALL_TEXTURE := preload("res://assets/props/wall.png")
 enum CellState { EMPTY, WALL, BLOCK }
 
 const BLOCK_DENSITY := 0.6
-const POWERUP_DROP_CHANCE := 0.35
 const FLOOR_COLOR := Color(0.22, 0.24, 0.2)
+# Roughly matches the fixed checkerboard pattern's interior wall ratio
+# (every even x, even y cell -> ~1/4 of interior cells) when scattering
+# indestructible walls randomly instead.
+const RANDOM_WALL_DENSITY := 0.22
 # Temp walls reuse the destructible block sprite, lightly tinted with the
 # placing player's color so it reads as "theirs" without a dedicated asset.
 const TEMP_WALL_OWNER_TINT_STRENGTH := 0.35
@@ -38,12 +41,15 @@ func generate() -> void:
 			var cell := Vector2i(x, y)
 			if x == 0 or y == 0 or x == Consts.GRID_WIDTH - 1 or y == Consts.GRID_HEIGHT - 1:
 				cells[cell] = CellState.WALL
-			elif x % 2 == 0 and y % 2 == 0:
+			elif not Consts.random_indestructible_walls and x % 2 == 0 and y % 2 == 0:
 				cells[cell] = CellState.WALL
 			else:
 				cells[cell] = CellState.EMPTY
 
 	var protected_cells := _get_protected_cells()
+	if Consts.random_indestructible_walls:
+		_scatter_random_walls(protected_cells)
+
 	for cell in cells.keys():
 		if cells[cell] != CellState.EMPTY:
 			continue
@@ -53,6 +59,46 @@ func generate() -> void:
 			_place_block(cell)
 
 	queue_redraw()
+
+# Alternate "map mode": scatter indestructible walls randomly across the
+# interior instead of the fixed checkerboard pattern above.
+#
+# Unlike the checkerboard, random placement can seal the arena into regions
+# with no route between them. Survivors stranded in different regions can
+# never reach each other, so the last-one-standing check never fires and the
+# round runs forever — hence every wall that would break connectivity is
+# rejected. Blocks aren't placed yet here, so "not a wall" is exactly "open".
+func _scatter_random_walls(protected_cells: Array) -> void:
+	for x in range(1, Consts.GRID_WIDTH - 1):
+		for y in range(1, Consts.GRID_HEIGHT - 1):
+			var cell := Vector2i(x, y)
+			if cells[cell] != CellState.EMPTY:
+				continue
+			if protected_cells.has(cell):
+				continue
+			if randf() >= RANDOM_WALL_DENSITY:
+				continue
+			cells[cell] = CellState.WALL
+			if not _all_open_cells_connected():
+				cells[cell] = CellState.EMPTY
+
+func _all_open_cells_connected() -> bool:
+	var open_count := 0
+	for cell in cells:
+		if cells[cell] != CellState.WALL:
+			open_count += 1
+	var start: Vector2i = get_spawn_cells()[0]
+	var seen := {start: true}
+	var queue: Array[Vector2i] = [start]
+	while not queue.is_empty():
+		var cur: Vector2i = queue.pop_back()
+		for dir in Consts.DIRECTIONS:
+			var next: Vector2i = cur + dir
+			if seen.has(next) or not cells.has(next) or cells[next] == CellState.WALL:
+				continue
+			seen[next] = true
+			queue.append(next)
+	return seen.size() == open_count
 
 func _get_protected_cells() -> Array:
 	var protected: Array = []
@@ -83,7 +129,7 @@ func destroy_block_at(cell: Vector2i) -> void:
 	blocks_by_cell[cell].destroy()
 	blocks_by_cell.erase(cell)
 	cells[cell] = CellState.EMPTY
-	if randf() < POWERUP_DROP_CHANCE:
+	if randf() < Consts.powerup_chance_percent / 100.0:
 		_spawn_powerup(cell)
 
 func _spawn_powerup(cell: Vector2i) -> void:
