@@ -100,20 +100,49 @@ In-match:
 - [x] 1. Grid movement + base bomb + destructible blocks
 - [x] 2. Local multiplayer — Lobby join flow (up to 4, keyboard + gamepads), mid-match disconnect/reconnect handling
 - [x] 3. Rounds/score UI — 5s results overlay between rounds, 5-round match, match winner by score
-- [x] 4. Character roster + abilities — Bomb-Master, Scout, Engineer, Pyro, Bomb-Kicker (5 characters; brief listed 4, added a 5th per later request)
+- [x] 4. Character roster + abilities — Bomb-Master, Parkour Runner, Engineer, Pyro, Bomb-Kicker (5 characters; brief listed 4, added a 5th per later request)
 - [~] 5. Powerups — bomb count/radius/speed/shield drop from blocks and sit on the ground until collected (bobbing icon, never destroyed by blasts); extra weapon *pickups* (mine/remote/fire bomb) not yet built
 - [~] 6. Art & audio — AI-generated (PixelLab) pixel-art characters with walk animations, HUD/pickup icons, pause menu icons, blocks, walls, explosions, temp wall all done. Procedural sound effects and two music loops are in; no voice/announcer.
 - [x] 7. Sudden death — a round that drags past 5 minutes gets walled in from the outside
 
 ## Characters
 
-| Character | Passive | Ability (B / cooldown ~2.5s) |
+| Character | Passive | Ability (ability button) |
 |---|---|---|
-| Bomb-Master | +1 blast radius, +1 bomb, from the start | — |
-| Scout | +20% move speed | Dash 2 cells in facing direction |
-| Engineer | — | Place a temp wall (5s) on your own cell, destroyed early by a blast |
-| Pyro | — | Every bomb explodes in a radius, not a cross |
-| Bomb-Kicker | — | Kick the bomb in front of you; it slides until it hits an obstacle, and can still explode mid-slide |
+| Bomb-Master (Сапёр) | +1 blast radius, +1 bomb, +1 shield, from the start | **No fuse at all** — every bomb you place is a remote mine (blinking antenna, no ticking Timer) that only goes off when you press this |
+| Parkour Runner (Паркурщик) | +25% move speed, +1 shield | Double-tap a direction to hop over a crate, a bomb, **or an indestructible wall** (no button) |
+| Engineer | +1 bomb | Place a temp wall (12s) on your own cell — passable for you only, destroyed early by a blast. **One wall per bomb you have** |
+| Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs | Every bomb explodes in a diamond and punches through crates |
+| Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, and skating: unbroken straight-line running charges speed up to 1.6x over 0.8s | Kick the bomb in front of you; it slides until it hits an obstacle, and can still explode mid-slide |
+
+The Sapper's mines stay live until triggered — by the ability button, or by chain-detonating in
+someone else's blast — with no timeout of their own, so `bomb_count_current` doesn't refill until
+one actually goes off (`Bomb.remote`, set in `Player.place_bomb()`; `Bomb._ready()` skips starting
+the fuse Timer entirely for one). A Sapper who dies holding unplaced charges leaves live mines
+sitting on the map for the rest of the round, blocking their cell like anyone else's bomb, until
+another blast reaches them.
+
+The wall-hop is what makes the Parkour Runner the one character who isn't fighting the map's fixed
+layout: everyone else treats the checkerboard/random indestructible walls as permanent, but a
+double-tap clears a single-thick one same as a crate. A double-thick wall or the arena's outer ring
+still isn't jumpable — the landing cell has to be open ground, and there the hop just fails.
+
+Every character also biases the powerups dropped by the crates *they* break toward the stat their
+kit scales on (Pyro → radius, since the diamond grows as an area; Parkour Runner → speed;
+Sapper/Engineer/Hockey → bomb count). The bias only
+redistributes a fixed drop chance between the four types, so the number of powerups on the map is
+unchanged — raising the *total* is Pyro's alone.
+
+The skating charge resets the instant the run breaks — a turn, a released stick, or walking into a
+wall — so it pays for committing to a whole corridor and gives nothing back in the tight weaving
+where the rest of the roster is tuned. It was added (with the shield) because kick-only was too thin
+a kit to be worth picking.
+
+Balance note: Pyro was the only character with a compounding advantage (more powerups → more bombs →
+more crates broken), so the rest of the roster was brought up to it rather than Pyro brought down.
+The Engineer was the worst off — no passive at all, and a single minute-long wall — and got the
+biggest share of that: a starting bomb, a wall budget tied to their bomb count, and a wall lifetime
+short enough that more walls doesn't mean a permanently redrawn map.
 
 Bombs chain-detonate: any blast that reaches another bomb sets it off immediately too.
 
@@ -247,8 +276,22 @@ deleted, so its owner gets the charge back instead of being down a bomb for the 
   if standing in one, otherwise BFS toward the nearest block/enemy and drop a bomb only if a safe
   post-blast escape path still exists (that escape check's BFS deliberately ignores blast-footprint
   cells while pathing through them — only the final resting cell has to be outside the blast, since
-  the multi-second fuse gives time to walk clear). Bots don't use character abilities yet (passives
-  like Bomb-Master/Scout still apply).
+  the multi-second fuse gives time to walk clear).
+- Bots also play their character's ability, not just its passives — added once the Sapper's trigger
+  and the Engineer's wall-per-bomb scaling made the ability half the kit rather than a bonus on top
+  of it. Each is character-specific and sits in its own `_bot_try_*` method in `Player.gd`: the
+  **Sapper** detonates every bomb it has out the instant an enemy steps into one of their blasts —
+  or, once it's safely clear, for a block-only blast too, since a Sapper's mines never go off on
+  their own and skipping the block case would leave the bot holding dead charges for the rest of the
+  round (only spends a shield on an enemy target, never on a block that isn't going anywhere); the
+  **Engineer** drops a wall on itself when a chokepoint cell (≤2 open neighbours) sits within
+  `BOT_WALL_ENEMY_RANGE` steps of an enemy, spaced out so its small budget doesn't get spent on one
+  corridor twice; the **Parkour Runner** hops over a block/bomb/indestructible wall to clear a blast
+  it's standing in, when a plain step can't; the **Hockey Player** kicks a bomb it's next to (which,
+  since nothing can block a blast one cell from its source, only ever happens while it's *in* that
+  bomb's blast) rather than just running, aiming down a lane at an enemy when one lines up. The first
+  three run as an alternative to the generic flee the instant the bot is in danger; the Engineer's
+  wall check instead runs on the normal wander/bomb decision, since placing one costs it nothing.
 - `Lobby._maybe_start()` auto-appends one bot slot if the match would otherwise start with exactly 1
   player — `GameManager.player_died()` only fires `round_ended` once exactly one player remains
   *after someone else died*, so a true solo match could never end on its own.

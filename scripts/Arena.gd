@@ -134,18 +134,15 @@ func destroy_block_at(cell: Vector2i, owner_player: Node = null) -> void:
 	var powerup_type: int = -1
 	var base_chance = Consts.powerup_chance_percent / 100.0
 
-	if owner_player != null and owner_player.has_meta("powerup_weights"):
-		# Use character's powerup weights system
+	if owner_player != null:
+		# Whoever broke the block biases what falls out of it, per character
+		# (see Player._apply_character_passives).
 		powerup_type = _pick_powerup_by_weights(owner_player.powerup_weights,
 			base_chance * owner_player.powerup_chance_multiplier)
-	elif owner_player != null and owner_player.powerup_weights.size() == 4:
-		# Fallback for player with weights but no meta (shouldn't happen)
-		powerup_type = _pick_powerup_by_weights(owner_player.powerup_weights,
-			base_chance * owner_player.powerup_chance_multiplier)
-	else:
-		# Normal: map setting chance, then random type
-		if randf() < base_chance:
-			powerup_type = randi() % 4
+	elif randf() < base_chance:
+		# Ownerless destruction (nothing does this today): map setting chance,
+		# then an even roll between the four types.
+		powerup_type = randi() % 4
 
 	if powerup_type >= 0:
 		_spawn_powerup(cell, powerup_type)

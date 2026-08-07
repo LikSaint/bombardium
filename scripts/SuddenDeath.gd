@@ -168,9 +168,11 @@ func _players_on(cell: Vector2i) -> Array:
 	for node in get_tree().get_nodes_in_group("players"):
 		if not node.alive:
 			continue
-		# Mid-step players count as being wherever they're drawn, not just where
-		# their move started, so a wall landing on them still connects.
-		if node.current_cell == cell or arena.world_to_cell(node.position) == cell:
+		# Where the player *is* is where their centre is. Movement is free-form,
+		# so a box merely clipping the sealed cell is not being buried by it —
+		# that player is pushed back out by Player's own unstick handling
+		# instead of being crushed.
+		if node.get_current_cell() == cell:
 			found.append(node)
 	return found
 

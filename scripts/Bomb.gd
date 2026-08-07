@@ -4,6 +4,12 @@ extends Node2D
 ## still blocks the blast from going further). Chains into any other bomb its
 ## blast reaches, and is always pushed into a slide by the Bomb-Kicker
 ## walking into it — own or an opponent's bomb alike.
+##
+## The Sapper's bombs are `remote`: no fuse at all, no Timer running, and they
+## never go off on their own — only Player._ability_detonate() (or a chain
+## reaction from someone else's blast reaching them) sets them off. They carry
+## a blinking antenna instead of a burning fuse, so an untriggered one reads
+## as "planted and armed", not "about to go off any second".
 
 const ExplosionScene := preload("res://scenes/Explosion.tscn")
 const SLIDE_STEP_DURATION := 0.08
@@ -12,6 +18,7 @@ signal exploded
 
 @export var radius: int = 2
 @export var is_circle_blast: bool = false # Pyro passive: fills a radius instead of a cross
+@export var remote: bool = false # Sapper passive: no fuse, detonated only on demand
 var cell: Vector2i
 var arena: Node2D
 var owner_player: Node2D
@@ -21,16 +28,29 @@ var is_sliding: bool = false
 
 const FUSE_BASE := Vector2(8, -6)
 const FUSE_TIP_FULL := Vector2(20, -20)
+const ANTENNA_BLINK_PERIOD := 0.8 # seconds per full on/off cycle
 
 func _ready() -> void:
 	arena.register_bomb(cell, self)
 	$BombBody.texture = Consts.BOMB_TEXTURE
+	$Fuse.visible = not remote
+	$Spark.visible = not remote
+	$Antenna.visible = remote
+	$AntennaTip.visible = remote
+	if not remote:
+		$Timer.start()
 
-# Fuse cue: burns down (shortens toward the bomb) and pulses/glows redder
-# faster the closer it is to going off.
 func _process(_delta: float) -> void:
 	if has_exploded:
 		return
+	if remote:
+		_update_antenna_blink()
+	else:
+		_update_fuse_cue()
+
+# Fuse cue: burns down (shortens toward the bomb) and pulses/glows redder
+# faster the closer it is to going off.
+func _update_fuse_cue() -> void:
 	var t: float = $Timer.time_left / $Timer.wait_time if $Timer.wait_time > 0.0 else 0.0
 	var freq: float = lerp(2.0, 12.0, 1.0 - t)
 	var phase: float = Time.get_ticks_msec() / 1000.0 * freq
@@ -42,6 +62,13 @@ func _process(_delta: float) -> void:
 	$Fuse.points = PackedVector2Array([FUSE_BASE, tip])
 	$Spark.position = tip
 	$Spark.scale = Vector2.ONE * pulse
+
+## The only "still armed" cue a remote bomb gives — a plain on/off blink, at a
+## constant rate, since there's no countdown to race against and nothing
+## should read as urgency here.
+func _update_antenna_blink() -> void:
+	var phase := fmod(Time.get_ticks_msec() / 1000.0, ANTENNA_BLINK_PERIOD)
+	$AntennaTip.modulate.a = 1.0 if phase < ANTENNA_BLINK_PERIOD * 0.5 else 0.15
 
 func _on_timer_timeout() -> void:
 	explode()

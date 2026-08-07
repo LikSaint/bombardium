@@ -38,6 +38,18 @@ var facing_dir: Vector2i = Consts.DIR_DOWN
 # upgrade (which scales move_duration) keeps working unchanged.
 var move_speed: float = 0.0 # px/s, = CELL_SIZE / move_duration
 
+# Hockey-Player passive: skating. Holding one direction without turning builds
+# a charge that scales `move_speed` up to SPRINT_MAX_FACTOR, and any break in
+# the run — turning, releasing, or hitting a wall — drops it back to zero at
+# once. The payoff is deliberately gated behind a long straight line: it makes
+# the character fast at crossing open corridors (running a kicked bomb down,
+# escaping a blast lane) without touching the tight, cell-by-cell weaving
+# where the rest of the roster is balanced.
+const SPRINT_CHARGE_TIME := 0.8 # seconds of unbroken straight running to reach top speed
+const SPRINT_MAX_FACTOR := 1.6
+var _sprint_charge: float = 0.0
+var _sprint_dir: Vector2i = Vector2i.ZERO
+
 # Half-extent of the box tested against the grid. Smaller than the cell so a
 # player lined up in a corridor never clips the walls flanking it.
 const PLAYER_HALF_EXTENT := 20.0
@@ -47,7 +59,7 @@ const WALL_EPSILON := 0.01
 # everyone, including whoever dropped it — but you have to be able to walk off
 # the one under your feet, so it stays passable until you clear the cell.
 var _bomb_grace: Dictionary = {} # Vector2i -> true
-# Set while a tween owns `position` (Scout hop, sudden-death shove); normal
+# Set while a tween owns `position` (Parkour hop, sudden-death shove); normal
 # input-driven movement stands down so the two never fight over the transform.
 var _scripted_move: bool = false
 
@@ -66,6 +78,18 @@ var is_fleeing: bool = false
 const BOT_POWERUP_CHASE_MAX_STEPS := 8 # further than this, a pickup isn't worth abandoning the hunt for
 const BOMB_FUSE_DURATION := 2.0 # must match Bomb.tscn's Timer wait_time
 const BOMB_ESCAPE_SAFETY_MARGIN := 0.4 # buffer so a bomb is never a photo finish
+
+# --- Bot character play ----------------------------------------------------
+# Everything above is character-blind: it walks, it bombs, it runs away. These
+# tune the parts that are specific to one character's kit, because a bot that
+# never presses its own ability button is a bot playing a stat block rather
+# than a character — and with the Sapper's trigger and the Engineer's walls
+# doing most of their work, that gap now decides matches.
+const BOT_WALL_ENEMY_RANGE := 5 # steps to the nearest enemy; further and a wall is just litter
+const BOT_WALL_MAX_OPEN_NEIGHBOURS := 2 # only wall a chokepoint — on open ground a wall is walked around
+const BOT_KICK_MAX_LANE := 10 # cells of slide worth scanning for a target
+const BOT_KICK_MIN_LANE := 2 # a shove that moves the bomb one cell hasn't got it off us
+const BOT_KICK_MIN_FUSE := 0.6 # seconds; below this the bomb goes off mid-shove
 
 var move_duration: float = 0.3
 var bomb_count_max: int = 1
@@ -94,14 +118,18 @@ var powerup_weights: Array[int] = [1, 1, 1, 1]
 # Multiplier for total powerup spawn chance
 var powerup_chance_multiplier: float = 1.0
 
-# Scout/Runner: jumping a wooden block requires pressing the same direction
+# Parkour: jumping a wooden block requires pressing the same direction
 # twice within this window (not a dedicated ability button).
 const DOUBLE_TAP_WINDOW := 0.35
 var _prev_held_dirs: Dictionary = {} # Vector2i -> bool, last frame's raw held state
 var _last_dir_press_time: Dictionary = {} # Vector2i -> float (Time.get_ticks_msec()/1000.0)
 
-# Engineer: temp walls this player currently has active, capped by bomb_level.
+# Engineer: temp walls this player currently has active, capped by bomb_count_max.
 var active_temp_walls: Array = []
+
+# Bombs this player has out and still ticking. Everyone maintains it (it's how
+# a bomb charge is handed back), but only the Sapper's trigger reads it.
+var live_bombs: Array = []
 
 func _ready() -> void:
 	is_bot = device_id == Consts.DEVICE_BOT
@@ -112,6 +140,13 @@ func _ready() -> void:
 	_apply_character_passives()
 	_update_move_speed()
 
+## Every character biases the powerups dropped by the blocks *they* destroy
+## toward the stat their kit actually scales on (see Arena._pick_powerup_by_weights).
+## The weights only redistribute a fixed drop chance between the four types —
+## the total stays the map setting — so a bias costs nothing to hand out and
+## gives each character a direction to grow in rather than a random walk.
+## Pyro's `powerup_chance_multiplier` is the one exception: it raises the total,
+## and it stays Pyro's alone.
 func _apply_character_passives() -> void:
 	match character_id:
 		CharacterId.BOMB_MASTER:
@@ -121,16 +156,40 @@ func _apply_character_passives() -> void:
 			bomb_level += 1
 			radius_level += 1
 			shield_charges += 1
+			# BOMB_COUNT: the trigger sets off every bomb at once, so bombs are
+			# what scales the Sapper — three at a time is a shaped minefield,
+			# one is just a bomb with better timing.
+			powerup_weights = [3, 1, 1, 1]
 		CharacterId.SCOUT:
-			move_duration *= 0.9
-			speed_level += 1
+			# 0.8 rather than 0.9: at one 10% step the Parkour Runner was simply a worse
+			# Hockey Player (same speed, no shield, no kick), and the hop alone
+			# didn't cover the gap. Speed is the whole identity, so it's the
+			# thing to lean into.
+			move_duration *= 0.8
+			speed_level += 2
+			shield_charges += 1
+			powerup_weights = [1, 1, 3, 1]  # SPEED
+		CharacterId.ENGINEER:
+			# The wall cap is the bomb count (see _ability_temp_wall), so the
+			# extra bomb is also an extra wall — and it's what makes the
+			# Engineer's actual combo (bomb an opponent, wall off their escape)
+			# possible at all, which a single bomb never was.
+			bomb_count_max += 1
+			bomb_count_current = bomb_count_max
+			bomb_level += 1
+			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — every bomb is another wall
 		CharacterId.PYRO:
 			shield_charges += 1
-			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT tripled
+			# RADIUS: the diamond blast grows as an area, not as four arms, so a
+			# radius step is worth several times what it is to anyone else —
+			# radius is the Pyro's power stat and the weights should say so.
+			powerup_weights = [1, 3, 1, 1]
 			powerup_chance_multiplier = 1.5  # 50% more total powerup chance
 		CharacterId.BOMB_KICKER:
 			move_duration *= 0.9
 			speed_level += 1
+			shield_charges += 1
+			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — more bombs, more pucks
 	stats_changed.emit()
 
 ## GameManager owns the slot->device bookkeeping, but the live character in the
@@ -200,9 +259,20 @@ func _physics_process(delta: float) -> void:
 
 	_release_cleared_bombs()
 
+	# Something solid arrived on top of the player rather than the other way
+	# round. Nothing they press can help until they're back on open ground, so
+	# that takes priority over input for as long as it lasts.
+	if not _can_stand_at(position):
+		_unstick(delta)
+		return
+
+	_update_sprint(dir, delta)
+
 	if dir != Vector2i.ZERO:
 		_move_free(dir, delta)
-		$Portrait.set_walking(true, move_duration)
+		# Paced by the *effective* duration, so a sprint reads on the sprite
+		# (legs cycling faster) and not just on the distance covered.
+		$Portrait.set_walking(true, move_duration / _sprint_factor())
 	else:
 		$Portrait.set_walking(false)
 
@@ -210,6 +280,25 @@ func _physics_process(delta: float) -> void:
 	# they're properly on the cell rather than on a step boundary that no
 	# longer exists.
 	arena.try_collect_powerup(get_current_cell(), self)
+
+## Straight-line charge, for whoever has the skating passive. Standing still or
+## turning is a full reset rather than a decay: the mechanic is meant to be read
+## off the screen ("they've been running that lane for a while, they're fast
+## now"), and a hidden lingering charge would make the same input produce
+## different speeds for no visible reason.
+func _update_sprint(dir: Vector2i, delta: float) -> void:
+	if character_id != CharacterId.BOMB_KICKER:
+		return
+	if dir == Vector2i.ZERO or dir != _sprint_dir:
+		_sprint_dir = dir
+		_sprint_charge = 0.0
+		return
+	_sprint_charge = minf(_sprint_charge + delta, SPRINT_CHARGE_TIME)
+
+func _sprint_factor() -> float:
+	if _sprint_charge <= 0.0:
+		return 1.0
+	return lerpf(1.0, SPRINT_MAX_FACTOR, _sprint_charge / SPRINT_CHARGE_TIME)
 
 func _poll_move_dir() -> Vector2i:
 	var x := 0.0
@@ -283,10 +372,11 @@ func _joy_vector() -> Vector2:
 		v.y += 1.0
 	return v
 
-## Scout/Runner passive: pressing a direction twice quickly while a wooden
-## block or a bomb sits directly ahead hops clean over it. Edge-tracking runs
-## every frame (even mid-move) so timing isn't skewed by movement being busy;
-## only the jump attempt itself is gated on not already moving.
+## Parkour passive: pressing a direction twice quickly while a crate, a bomb,
+## or a solid wall — indestructible stone included — sits directly ahead hops
+## clean over it. Edge-tracking runs every frame (even mid-move) so timing
+## isn't skewed by movement being busy; only the jump attempt itself is gated
+## on not already moving.
 func _update_jump_double_tap() -> void:
 	var held := _held_dirs()
 	var now := Time.get_ticks_msec() / 1000.0
@@ -309,7 +399,16 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 	# A temp wall only counts as a jumpable obstacle when it's blocking *this*
 	# player — the owner already walks through it normally, no jump needed.
 	var is_foreign_temp_wall: bool = arena.is_temp_wall(mid_cell) and not arena.is_walkable_for(mid_cell, self)
-	if not arena.is_block(mid_cell) and not arena.has_bomb_at(mid_cell) and not is_foreign_temp_wall:
+	# Permanent stone — the checkerboard/random indestructible walls, never
+	# removable by any blast — is a jumpable obstacle too. This is what makes
+	# the hop parkour rather than a crate-specific trick: it can cut through
+	# the map's fixed layout, not just the destructible clutter on top of it.
+	# The one thing it can never do is clear a *double*-thick wall or the
+	# arena's outer ring, because those still fail the landing check below —
+	# no separate case needed, the same two-cell hop that lands past a single
+	# wall simply lands on more wall.
+	var is_permanent_wall: bool = arena.is_wall(mid_cell) and not arena.is_temp_wall(mid_cell)
+	if not arena.is_block(mid_cell) and not arena.has_bomb_at(mid_cell) and not is_foreign_temp_wall and not is_permanent_wall:
 		return
 	if not arena.is_walkable_for(target_cell, self):
 		return
@@ -328,6 +427,13 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 ## note on is_fleeing above.
 func _bot_update(delta: float) -> Vector2i:
 	bot_decision_timer -= delta
+
+	# Checked every frame rather than on the decision tick, unlike everything
+	# else the bot does: the window for a detonation is open only while an
+	# enemy is actually standing in the blast, and someone walking through at
+	# full tilt clears a cell in well under one BOT_DECISION_INTERVAL.
+	if character_id == CharacterId.BOMB_MASTER:
+		_bot_try_detonate()
 
 	# A decision is a *cell* to walk to, but movement is now continuous, so the
 	# heading has to be held until the bot actually arrives — returning it for
@@ -363,15 +469,50 @@ func _bot_think() -> void:
 	var hazard := _compute_active_hazard_cells()
 	if danger.has(current_cell) or hazard.has(current_cell):
 		is_fleeing = true
+		# Two characters have a better answer to a live blast than running,
+		# and both are only available *here* — by the time the generic flee
+		# has picked a direction, the chance to use them is gone.
+		if _bot_try_character_escape(danger, hazard):
+			return
 		_bot_flee(danger, hazard)
 		return
 	is_fleeing = false
+	# Terrain first: a wall costs the Engineer nothing to place (they walk
+	# through their own), so it's never worth giving up a turn for, and it
+	# leaves the bot free to bomb or wander in the same decision.
+	if character_id == CharacterId.ENGINEER:
+		_bot_try_wall(danger)
 	if bomb_count_current > 0 and not arena.has_bomb_at(current_cell) and _bot_should_bomb(danger, hazard):
 		place_bomb()
 		is_fleeing = true
 		_bot_flee(_compute_danger_cells(), _compute_active_hazard_cells())
 		return
 	_bot_wander(danger, hazard)
+
+## Character-specific ways out of a blast, tried before the generic flee.
+## Returns true when one was taken (and has set the bot's heading itself).
+func _bot_try_character_escape(danger: Dictionary, hazard: Dictionary) -> bool:
+	match character_id:
+		CharacterId.SCOUT:
+			# The hop clears two cells in one move and goes over the crate
+			# that's penning the Parkour Runner in, which is regularly the only way
+			# out of a dead end and always the quickest one.
+			return _bot_try_escape_jump(danger, hazard)
+		CharacterId.BOMB_KICKER:
+			# Push the threat away instead of outrunning it — and aim it at
+			# someone on the way out if a lane happens to point at them.
+			#
+			# This is the *only* point in the decision where a bot can ever
+			# kick, and not by preference: a bomb on the neighbouring cell
+			# always covers this one (nothing can block a blast one cell from
+			# its source), so being next to a kickable bomb and being in
+			# danger are the same state. Checking for kicks anywhere below
+			# this branch would be checking a condition that is never true.
+			var kick := _bot_kick_dir()
+			if kick != Vector2i.ZERO:
+				bot_move_dir = kick
+				return true
+	return false
 
 func _blast_cells_for(cell: Vector2i, radius: int, is_circle: bool) -> Dictionary:
 	var cells := {cell: true}
@@ -485,11 +626,20 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 # than our own full fuse. Budget against whichever live bomb would reach us
 # soonest, not just BOMB_FUSE_DURATION, or a chain reaction can strand a bot
 # mid-escape with far less time than it planned for.
+#
+# Remote (Sapper) bombs are skipped entirely: they carry no running Timer, so
+# reading one's time_left would report 0 and make every cell near an
+# unexploded mine look like an imminent detonation. They impose no clock of
+# their own — a remote bomb only ever goes off by a button press or by a
+# *ticking* bomb's blast reaching it, and that ticking bomb is what this scan
+# picks up regardless of what else happens to be sitting in its blast.
 func _time_until_forced_detonation() -> float:
 	var current_cell := get_current_cell()
 	var soonest := BOMB_FUSE_DURATION
 	for bomb_cell in arena.bombs_by_cell.keys():
 		var bomb = arena.bombs_by_cell[bomb_cell]
+		if bomb.remote:
+			continue
 		if not _blast_cells_for(bomb_cell, bomb.radius, bomb.is_circle_blast).has(current_cell):
 			continue
 		soonest = min(soonest, bomb.get_node("Timer").time_left)
@@ -612,6 +762,170 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 	else:
 		bot_move_dir = _bot_random_safe_dir(danger, hazard)
 
+## Sapper trigger, bot side. Fires when an enemy is standing in the blast of a
+## bomb this bot has out, or — once it's safely clear — when there's nothing
+## left to wait for but a block. This is the *only* way any of the bot's
+## bombs ever go off: they're remote mines with no fuse (see Bomb.gd), so
+## without this a bot would place its bombs once, run dry at
+## `bomb_count_max`, and never get a charge back for the rest of the round.
+##
+## The trigger is all-or-nothing (it sets off every bomb the bot owns, and
+## chains from there), so the bot has to be clear of *all* of them, not just of
+## the one with the target in it. A shield buys an exception for an enemy
+## target: trading a charge for a kill is a good trade, and it's the one the
+## character is built to make. A block-only trigger never spends the shield —
+## there's no reason to eat a hit for a wall that isn't going anywhere.
+func _bot_try_detonate() -> void:
+	if ability_on_cooldown or live_bombs.is_empty():
+		return
+	var current_cell := get_current_cell()
+	var targets_enemy := false
+	var targets_block := false
+	var self_in_blast := false
+	for bomb in live_bombs:
+		if not is_instance_valid(bomb) or bomb.has_exploded:
+			continue
+		var blast := _blast_cells_for(bomb.cell, bomb.radius, bomb.is_circle_blast)
+		if blast.has(current_cell):
+			self_in_blast = true
+		for c in blast:
+			if _enemy_at(c) != null:
+				targets_enemy = true
+			elif arena.is_block(c):
+				targets_block = true
+	if not targets_enemy and not targets_block:
+		return
+	if self_in_blast and (not targets_enemy or shield_charges <= 0):
+		return
+	use_ability()
+
+## Engineer walls, bot side. A wall is only worth spending when it costs
+## someone something, so this asks for three things at once: an enemy close
+## enough to be affected, a cell narrow enough that they can't simply walk
+## around it, and no live blast about to demolish the wall for free.
+##
+## Spacing them out matters as much as placing them — the budget is small, and
+## a bot that dumps its whole allowance into two neighbouring cells of the same
+## corridor has blocked exactly one route twice.
+func _bot_try_wall(danger: Dictionary) -> void:
+	if ability_on_cooldown or active_temp_walls.size() >= bomb_count_max:
+		return
+	var current_cell := get_current_cell()
+	if danger.has(current_cell) or arena.has_bomb_at(current_cell):
+		return
+	if _open_neighbour_count(current_cell) > BOT_WALL_MAX_OPEN_NEIGHBOURS:
+		return
+	if _has_own_wall_adjacent(current_cell):
+		return
+	var to_enemy := _bfs_find(current_cell, func(c): return _enemy_at(c) != null)
+	# size() < 2 means the enemy is on this very cell — they're already past
+	# whatever this wall would have blocked.
+	if to_enemy.size() < 2 or to_enemy.size() - 1 > BOT_WALL_ENEMY_RANGE:
+		return
+	use_ability()
+
+func _open_neighbour_count(cell: Vector2i) -> int:
+	var count := 0
+	for dir in Consts.DIRECTIONS:
+		if arena.is_walkable_for(cell + dir, self):
+			count += 1
+	return count
+
+func _has_own_wall_adjacent(cell: Vector2i) -> bool:
+	for dir in Consts.DIRECTIONS:
+		if arena.temp_wall_cells.get(cell + dir) == self:
+			return true
+	return false
+
+## Parkour's hop, bot side. Humans trigger it with a double tap
+## (_update_jump_double_tap, which is human-only because a bot has no taps to
+## read); a bot picks the direction outright.
+##
+## Escapes only. Two cells for the price of one clears a blast lane a plain
+## step cannot, but the landing cell has to be somewhere the bot actually wants
+## to be — hopping out of one blast into another is how this would otherwise
+## get the Parkour Runner killed faster than not having it. The cell being jumped over
+## is checked too: the hop is a tween through real space, and Explosion damages
+## on proximity every frame, so passing over a live blast is not free.
+func _bot_try_escape_jump(danger: Dictionary, hazard: Dictionary) -> bool:
+	if _scripted_move:
+		return false
+	var current_cell := get_current_cell()
+	for dir in Consts.DIRECTIONS:
+		var mid: Vector2i = current_cell + dir
+		var landing: Vector2i = current_cell + dir * 2
+		if hazard.has(mid) or danger.has(landing) or hazard.has(landing):
+			continue
+		# Permanent stone is jumpable too (see _try_jump_over_obstacle) — a
+		# bot boxed in by indestructible walls on three sides used to have no
+		# escape at all, since the generic flee/wander pathing treats stone as
+		# equally solid whichever kind it is.
+		var mid_is_wall: bool = arena.is_wall(mid) and not arena.is_temp_wall(mid)
+		if not arena.is_block(mid) and not arena.has_bomb_at(mid) and not mid_is_wall:
+			continue
+		if not arena.is_walkable_for(landing, self):
+			continue
+		_try_jump_over_obstacle(dir)
+		if _scripted_move:
+			# The hop owns `position` until it lands, so the walk order that
+			# was in flight has to be dropped — it aims at a cell the bot is
+			# about to be two cells past.
+			bot_move_dir = Vector2i.ZERO
+			bot_hold_time = 0.0
+			return true
+	return false
+
+## Hockey Player's kick, bot side. The kick itself fires on contact from
+## _move_free, and the pathfinder never routes into a bomb cell, so without
+## this a bot would go a whole match without kicking anything.
+##
+## Returns a direction to walk into, or ZERO. Only called while the bot is in
+## a blast (see _bot_try_character_escape), so every candidate here is a bomb
+## that is currently threatening it: the kick is an escape that happens to
+## double as an attack, and directions that also send the bomb at an enemy are
+## preferred over ones that merely get it away.
+func _bot_kick_dir() -> Vector2i:
+	var current_cell := get_current_cell()
+	if _time_until_forced_detonation() < BOT_KICK_MIN_FUSE:
+		return Vector2i.ZERO
+	var fallback := Vector2i.ZERO
+	for dir in Consts.DIRECTIONS:
+		var bomb_cell: Vector2i = current_cell + dir
+		var bomb = arena.get_bomb_at(bomb_cell)
+		if bomb == null or bomb.is_sliding or bomb.has_exploded:
+			continue
+		var lane := _slide_lane(bomb_cell, dir)
+		if lane.size() < BOT_KICK_MIN_LANE:
+			continue
+		# Where it comes to rest still has to be somewhere that isn't pointed
+		# back at the bot — a bomb shoved down a short lane can end up with
+		# this cell inside its blast all over again.
+		var resting: Vector2i = lane[lane.size() - 1]
+		var resting_blast := _blast_cells_for(resting, bomb.radius, bomb.is_circle_blast)
+		if resting_blast.has(current_cell):
+			continue
+		for c in lane:
+			if _enemy_at(c) != null:
+				return dir
+		for c in resting_blast:
+			if _enemy_at(c) != null:
+				return dir
+		if fallback == Vector2i.ZERO:
+			fallback = dir
+	return fallback
+
+## Cells a kicked bomb would travel through, stopping where Bomb._slide_step
+## does. The last entry is where it comes to rest.
+func _slide_lane(from: Vector2i, dir: Vector2i) -> Array:
+	var lane: Array = []
+	var c: Vector2i = from + dir
+	while lane.size() < BOT_KICK_MAX_LANE:
+		if not arena.in_bounds(c) or arena.is_wall(c) or arena.is_block(c) or arena.has_bomb_at(c):
+			break
+		lane.append(c)
+		c += dir
+	return lane
+
 const PORTRAIT_REST_Y := -4.0
 
 ## One frame of free movement along `dir`.
@@ -627,25 +941,37 @@ const PORTRAIT_REST_Y := -4.0
 ## move there would leave the player stuck for no visible reason. The nudge
 ## lasts only until they line up, then movement is purely axial again.
 func _move_free(dir: Vector2i, delta: float) -> void:
-	var step := move_speed * delta
+	var step := move_speed * _sprint_factor() * delta
 	var straight := position + Vector2(dir) * step
 
 	if _can_stand_at(straight):
 		_apply_move(straight)
 		return
 
-	# From here the straight step is blocked by something.
+	# From here the straight step is blocked by something. Running into a wall
+	# (or a bomb) ends the run, so a sprint can't be held up against an obstacle
+	# and then spent the instant it clears.
+	_sprint_charge = 0.0
 	_try_kick_ahead(dir)
 
-	var centre: Vector2 = arena.cell_to_world(get_current_cell())
+	# Lining up is only worth doing when there is somewhere to line up *for*:
+	# the cell ahead of the player's own is open, so what stopped them is a
+	# corner clipped in the neighbouring lane rather than a wall in their way.
+	# Against a dead end there is nothing to round, and sliding them to the
+	# middle of a corridor they cannot leave is movement they never asked for —
+	# they stop flush and keep whatever offset they had.
+	var current_cell := get_current_cell()
+	var way_through: bool = _is_open(current_cell + dir)
+
+	var centre: Vector2 = arena.cell_to_world(current_cell)
 	var aligned := position
 	if dir.x != 0:
 		aligned.y = move_toward(position.y, centre.y, step)
 	else:
 		aligned.x = move_toward(position.x, centre.x, step)
-	# Already lined up, so the obstacle is genuinely dead ahead rather than a
-	# corner being clipped — nothing to correct.
-	if not aligned.is_equal_approx(position):
+	# `aligned == position` means already lined up, so the obstacle is genuinely
+	# dead ahead rather than a corner being clipped — nothing to correct.
+	if way_through and not aligned.is_equal_approx(position):
 		# Corner cut: carry on forward *and* line up in the same frame.
 		var assisted := aligned
 		if dir.x != 0:
@@ -669,12 +995,46 @@ func _move_free(dir: Vector2i, delta: float) -> void:
 	if not clamped.is_equal_approx(position) and _can_stand_at(clamped):
 		_apply_move(clamped)
 
+## Walks the player out of a position that is no longer legal.
+##
+## Sudden death seals cells regardless of who is standing near them, and with
+## free movement a box can be left overlapping the new wall while its centre
+## sits safely outside it — not enough to be crushed, but enough that every
+## candidate move fails the collision test. That used to wedge the player in
+## place for the rest of the round with no way out.
+##
+## The way out is the centre of their own cell when that is still open, and
+## otherwise the nearest open neighbour. This deliberately skips the usual
+## validity check: nothing is valid right now, and refusing to move is what
+## caused the deadlock.
+func _unstick(delta: float) -> void:
+	var cell := get_current_cell()
+	if not _is_open(cell):
+		cell = _nearest_open_cell(cell)
+		if cell == INVALID_CELL:
+			return
+	_sprint_charge = 0.0
+	position = position.move_toward(arena.cell_to_world(cell), move_speed * delta)
+
+func _nearest_open_cell(from: Vector2i) -> Vector2i:
+	var best := INVALID_CELL
+	var best_dist := INF
+	for dir in Consts.DIRECTIONS:
+		var c: Vector2i = from + dir
+		if not _is_open(c):
+			continue
+		var d: float = position.distance_squared_to(arena.cell_to_world(c))
+		if d < best_dist:
+			best_dist = d
+			best = c
+	return best
+
 func _apply_move(target: Vector2) -> void:
 	position = target
 	if not _footstep_playing:
 		_footstep_playing = true
 		Sfx.play("footstep", 1.0, 0.1)
-		get_tree().create_timer(move_duration).timeout.connect(func(): _footstep_playing = false)
+		get_tree().create_timer(move_duration / _sprint_factor()).timeout.connect(func(): _footstep_playing = false)
 
 var _footstep_playing: bool = false
 
@@ -762,16 +1122,19 @@ func place_bomb() -> void:
 	bomb.owner_player = self
 	bomb.radius = bomb_radius
 	bomb.is_circle_blast = character_id == CharacterId.PYRO
+	bomb.remote = character_id == CharacterId.BOMB_MASTER
 	bomb.position = arena.cell_to_world(current_cell)
 	arena.add_child(bomb)
-	bomb.exploded.connect(_on_owned_bomb_exploded)
+	bomb.exploded.connect(_on_owned_bomb_exploded.bind(bomb))
+	live_bombs.append(bomb)
 	bomb_count_current -= 1
 	# The bomb lands under the player's feet — it only becomes solid for them
 	# once they've walked clear of it (see _release_cleared_bombs).
 	_bomb_grace[current_cell] = true
 	Sfx.play("bomb_place")
 
-func _on_owned_bomb_exploded() -> void:
+func _on_owned_bomb_exploded(bomb: Node) -> void:
+	live_bombs.erase(bomb)
 	bomb_count_current = min(bomb_count_current + 1, bomb_count_max)
 
 func use_ability() -> void:
@@ -781,15 +1144,24 @@ func use_ability() -> void:
 	match character_id:
 		CharacterId.ENGINEER:
 			used = _ability_temp_wall()
+		CharacterId.BOMB_MASTER:
+			used = _ability_detonate()
 	if used:
 		ability_on_cooldown = true
 		get_tree().create_timer(ability_cooldown).timeout.connect(func(): ability_on_cooldown = false)
 
 ## Drops a temp wall on the Engineer's own cell — passable for them (see
 ## Arena.is_walkable_for), solid for everyone else, bombs, and explosions.
-## Capped at 1 + bomb_level, so it scales with bomb-count upgrades collected.
+##
+## Capped at the player's bomb count, not at a separate budget: walls are the
+## Engineer's half of the same resource bombs come out of, so a bomb-count
+## powerup reads as "+1 wall" as plainly as it reads "+1 bomb", and the HUD's
+## bomb counter doubles as the wall counter. This used to be `bomb_level + 1`,
+## which is the count of *collected upgrades* — it happened to give the same
+## number only because the Engineer had no starting bomb bonus to be out of
+## step with, and it silently ignored any bombs granted by a passive.
 func _ability_temp_wall() -> bool:
-	if active_temp_walls.size() >= bomb_level + 1:
+	if active_temp_walls.size() >= bomb_count_max:
 		return false
 	var wall: Node = arena.place_temp_wall(get_current_cell(), self)
 	if wall == null:
@@ -797,6 +1169,29 @@ func _ability_temp_wall() -> bool:
 	active_temp_walls.append(wall)
 	wall.tree_exited.connect(func(): active_temp_walls.erase(wall))
 	Sfx.play("wall_place")
+	return true
+
+## Sapper trigger: sets off every bomb they currently have out, at once.
+##
+## The Sapper's bombs (Bomb.gd's `remote` flag, set in place_bomb() below)
+## carry no fuse at all — no Timer, no countdown, nothing but a blinking
+## antenna to say they're still armed. This is the *only* thing that sets
+## them off, short of another player's blast reaching them first. That turns
+## every placed bomb into a trap that pays off the moment someone walks into
+## it, rather than a warning anyone can see coming and step around — which
+## was the one thing the Sapper's kit was missing; they were pure
+## front-loaded stats that the rest of the roster caught up to on powerups
+## alone. It cuts both ways — the Sapper is standing in their own blast just
+## as often as anyone else, so the timing is on them.
+##
+## Iterates over a copy: explode() chains into neighbouring bombs and feeds
+## back into _on_owned_bomb_exploded, which mutates live_bombs mid-loop.
+func _ability_detonate() -> bool:
+	if live_bombs.is_empty():
+		return false
+	for bomb in live_bombs.duplicate():
+		if is_instance_valid(bomb):
+			bomb.explode()
 	return true
 
 const KICK_LUNGE_DISTANCE := 16.0

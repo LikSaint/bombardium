@@ -47,12 +47,20 @@ func face(dir: Vector2i) -> void:
 
 ## duration is how long ONE full move (one grid cell) takes — the walk cycle
 ## is paced to match it, so faster characters visibly step faster.
+##
+## Player calls this every physics frame while moving, so it has to be a no-op
+## when nothing changed: restarting the cycle each call pinned the sprite to
+## frame 0 and the walk never actually animated. Only the transition into
+## walking rewinds; a changed `duration` (a speed powerup, or the Hockey
+## Player's sprint charge, which changes it continuously) just re-paces the
+## cycle in place.
 func set_walking(walking: bool, duration: float = 0.5) -> void:
-	is_walking = walking
-	if walking:
-		walk_frame_duration = duration / WALK_FRAME_COUNT
+	var frame_duration: float = duration / WALK_FRAME_COUNT
+	if walking and not is_walking:
 		walk_elapsed = 0.0
 		walk_frame_index = 0
+	is_walking = walking
+	walk_frame_duration = frame_duration
 	_apply_frame()
 
 func _process(delta: float) -> void:

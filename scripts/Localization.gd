@@ -19,16 +19,16 @@ var lang: String = DEFAULT_LANG
 const STRINGS := {
 	"ru": {
 		"CHAR_NAME_BOMB_MASTER": "Сапёр",
-		"CHAR_NAME_SCOUT": "Бегун",
+		"CHAR_NAME_SCOUT": "Паркурщик",
 		"CHAR_NAME_ENGINEER": "Инженер",
 		"CHAR_NAME_PYRO": "Пиро",
 		"CHAR_NAME_BOMB_KICKER": "Хокеист",
 
-		"CHAR_DESC_BOMB_MASTER": "Разбирается в бомбах",
-		"CHAR_DESC_SCOUT": "Двойное нажатие в сторону ящика или бомбы - перепрыгивает через неё",
-		"CHAR_DESC_ENGINEER": "%s: Поставить стену, через которую проходит только сам",
+		"CHAR_DESC_BOMB_MASTER": "Бомбы без фитиля — взрываются только по кнопке (%s)",
+		"CHAR_DESC_SCOUT": "Самый быстрый; двойное нажатие в сторону — перепрыгивает через ящик, бомбу или даже стену",
+		"CHAR_DESC_ENGINEER": "%s: Поставить стену, через которую проходит только сам. Стен — сколько бомб",
 		"CHAR_DESC_PYRO": "Бомбы взрываются кругом и немного пробивают ящики",
-		"CHAR_DESC_BOMB_KICKER": "Толкает бомбы движением — свои и чужие",
+		"CHAR_DESC_BOMB_KICKER": "Толкает бомбы движением — свои и чужие; разгоняется, пока бежит по прямой",
 
 		"MAP_SIZE_TINY": "Крошечная",
 		"MAP_SIZE_SMALL": "Маленькая",
@@ -68,7 +68,6 @@ const STRINGS := {
 		"SCORE_HEADER": "Счёт:",
 		"SCORE_LINE": "Player %d — %d",
 		"NEXT_ROUND_IN": "Следующий раунд через: %d",
-		"REPICK_HINT": "◀ %s ▶  —  можно сменить персонажа",
 
 		"SETTINGS_TITLE": "Настройки",
 		"SETTINGS_LANGUAGE": "Язык",
@@ -83,16 +82,16 @@ const STRINGS := {
 	},
 	"en": {
 		"CHAR_NAME_BOMB_MASTER": "Sapper",
-		"CHAR_NAME_SCOUT": "Runner",
+		"CHAR_NAME_SCOUT": "Parkour Runner",
 		"CHAR_NAME_ENGINEER": "Engineer",
 		"CHAR_NAME_PYRO": "Pyro",
 		"CHAR_NAME_BOMB_KICKER": "Hockey Player",
 
-		"CHAR_DESC_BOMB_MASTER": "Knows their way around bombs",
-		"CHAR_DESC_SCOUT": "Double-tap a direction toward a crate or bomb to hop over it",
-		"CHAR_DESC_ENGINEER": "%s: Place a wall only they can pass through",
+		"CHAR_DESC_BOMB_MASTER": "Bombs have no fuse — they only go off when you press the button (%s)",
+		"CHAR_DESC_SCOUT": "Fastest on their feet; double-tap a direction to hop over a crate, a bomb, or even a wall",
+		"CHAR_DESC_ENGINEER": "%s: Place a wall only they can pass through. One wall per bomb",
 		"CHAR_DESC_PYRO": "Bombs explode in a circle and punch through crates a bit",
-		"CHAR_DESC_BOMB_KICKER": "Pushes bombs by walking into them — theirs or anyone's",
+		"CHAR_DESC_BOMB_KICKER": "Pushes bombs by walking into them — theirs or anyone's; picks up speed while running in a straight line",
 
 		"MAP_SIZE_TINY": "Tiny",
 		"MAP_SIZE_SMALL": "Small",
@@ -132,7 +131,6 @@ const STRINGS := {
 		"SCORE_HEADER": "Score:",
 		"SCORE_LINE": "Player %d — %d",
 		"NEXT_ROUND_IN": "Next round in: %d",
-		"REPICK_HINT": "◀ %s ▶  —  you can change character",
 
 		"SETTINGS_TITLE": "Settings",
 		"SETTINGS_LANGUAGE": "Language",

@@ -7,7 +7,10 @@ extends Control
 ## just silently stops responding with no on-screen explanation.
 ##
 ## When a player dies, shows left/right arrows to cycle character selection
-## (takes effect next round), as well as a hotkey hint.
+## (takes effect next round), as well as a hotkey hint. The round winner gets
+## the same arrows on their own portrait during the post-round overlay (see
+## begin_winner_repick, called from Main.gd) — one re-pick UI for both cases
+## instead of a second one built out of a screen-center label.
 
 ## When true, mirrors the internal layout so the portrait sits at the outer
 ## edge of the widget and the stats sit toward the screen center — used for
@@ -21,6 +24,12 @@ var device_id: int
 var is_disconnected: bool = false
 var can_change_character: bool = false
 const CHARACTER_CHANGE_DELAY := 0.5
+
+## True only for the round winner, only during the post-round overlay. Lets
+## _input's arrow handling fire for a player who is still alive() — the death
+## path below never sets this, since a dead player's own alive flag already
+## takes care of it.
+var repick_active: bool = false
 
 var _portrait_rest_pos: Vector2
 var _bounce_tween: Tween
@@ -117,6 +126,14 @@ func _on_player_died(_id: int) -> void:
 		return
 	_show_character_selection()
 
+## Called by Main.gd on the winning slot's corner once a round ends. Skipped
+## by Main.gd itself for a bot or a disconnected pad (nobody to press the
+## arrows), so this doesn't need to re-check device_id the way _on_player_died
+## does — its caller already filtered for a live human on the other end.
+func begin_winner_repick() -> void:
+	repick_active = true
+	_show_character_selection()
+
 func _show_character_selection() -> void:
 	$ArrowLeft.visible = true
 	$ArrowRight.visible = true
@@ -155,7 +172,9 @@ func _refresh_hint() -> void:
 		$HotkeyHint.text = Loc.t("CYCLE_HINT", [Hints.label(device_id, Hints.Action.CYCLE)])
 
 func _input(event: InputEvent) -> void:
-	if player == null or player.alive:
+	if player == null:
+		return
+	if player.alive and not repick_active:
 		return
 	var dir := 0
 	if device_id == -1:

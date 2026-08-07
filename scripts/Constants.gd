@@ -27,6 +27,12 @@ func set_map_size(index: int) -> void:
 	GRID_WIDTH = MAP_SIZES[map_size_index]["width"]
 	GRID_HEIGHT = MAP_SIZES[map_size_index]["height"]
 
+## The arena's footprint in world pixels. The single place that turns the grid
+## into a size — everything that has to frame the arena on screen (Main's
+## camera fit) works from this rather than re-multiplying the grid itself.
+func arena_pixel_size() -> Vector2:
+	return Vector2(GRID_WIDTH, GRID_HEIGHT) * CELL_SIZE
+
 # --- Pre-match settings, configured on the Lobby's Settings screen ---------
 
 const PLAYER_SLOTS_MIN := 1
@@ -113,9 +119,6 @@ const CHARACTER_NAME_KEYS := [
 func character_name(character_id: int) -> String:
 	return Loc.t(CHARACTER_NAME_KEYS[character_id])
 
-# Player.CharacterId.ENGINEER — the only ability blurb that names a button.
-const ENGINEER_ID := 2
-
 # Short ability/passive blurb shown on character select. Index matches
 # CHARACTER_NAME_KEYS / Player.CharacterId order.
 const CHARACTER_ABILITY_DESC_KEYS := [
@@ -126,12 +129,14 @@ const CHARACTER_ABILITY_DESC_KEYS := [
 	"CHAR_DESC_BOMB_KICKER",
 ]
 
-## `device_id` selects which button label gets substituted into the
-## Engineer's blurb (keyboard letter vs. that player's actual gamepad glyph);
-## every other character's blurb ignores it.
+## A blurb for a character with a button-press ability carries a single `%s`;
+## `device_id` selects what gets substituted for it (keyboard letter vs. that
+## player's actual gamepad glyph). Blurbs without one ignore device_id, so
+## which characters have an ability lives in the strings rather than in a list
+## of ids here that has to be kept in step with them.
 func character_ability_desc(character_id: int, device_id: int = -1) -> String:
 	var text := Loc.t(CHARACTER_ABILITY_DESC_KEYS[character_id])
-	if character_id == ENGINEER_ID:
+	if text.contains("%s"):
 		var button := Hints.label(device_id, Hints.Action.ABILITY)
 		text = text % [button if button != "" else "—"]
 	return text
@@ -204,7 +209,9 @@ const CHARACTER_WALK_FRAMES := [
 	},
 ]
 
-# Get starting stats for a character (before any upgrades)
+# Starting stats for a character (before any upgrades), for the lobby's stat
+# pips. Must stay in step with Player._apply_character_passives(), which is
+# what actually applies them in the arena.
 func get_character_stats(character_id: int) -> Dictionary:
 	var stats = {"bombs": 1, "radius": 1, "speed": 0, "shield": 0}
 	match character_id:
@@ -212,14 +219,16 @@ func get_character_stats(character_id: int) -> Dictionary:
 			stats["bombs"] = 2
 			stats["radius"] = 2
 			stats["shield"] = 1
-		1:  # Scout
-			stats["speed"] = 1
+		1:  # Runner
+			stats["speed"] = 2
+			stats["shield"] = 1
 		2:  # Engineer
-			pass
+			stats["bombs"] = 2
 		3:  # Pyro
 			stats["shield"] = 1
 		4:  # Hockey player
 			stats["speed"] = 1
+			stats["shield"] = 1
 	return stats
 
 enum PowerupType { BOMB_COUNT, RADIUS, SPEED, SHIELD }
