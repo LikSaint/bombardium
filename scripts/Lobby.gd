@@ -22,8 +22,8 @@ const BAR_SELECTED_COLOR := Color(1.0, 0.65, 0.2, 1)
 
 const COUNTDOWN_SECONDS := 3
 
-enum SettingsRow { ROOM, MAP_SIZE, PLAYER_SLOTS, BOTS, RANDOM_WALLS, POWERUP_CHANCE, ROUNDS }
-const SETTINGS_ROW_COUNT := 7
+enum SettingsRow { ROOM, MAP_SIZE, PLAYER_SLOTS, BOTS, RANDOM_WALLS, POWERUP_CHANCE, SUDDEN_DEATH, ROUNDS }
+const SETTINGS_ROW_COUNT := 8
 
 var view: String = "settings" # "settings" or "room"
 var settings_selected: int = SettingsRow.ROOM
@@ -47,7 +47,7 @@ var countdown_active: bool = false
 @onready var settings_row_nodes: Array = [
 	$SettingsPanel/Rows/RoomRow, $SettingsPanel/Rows/MapSizeRow, $SettingsPanel/Rows/PlayerSlotsRow,
 	$SettingsPanel/Rows/BotsRow, $SettingsPanel/Rows/RandomWallsRow,
-	$SettingsPanel/Rows/PowerupChanceRow, $SettingsPanel/Rows/RoundsRow,
+	$SettingsPanel/Rows/PowerupChanceRow, $SettingsPanel/Rows/SuddenDeathRow, $SettingsPanel/Rows/RoundsRow,
 ]
 @onready var hotkey_legend: Label = $RoomView/HotkeyLegend
 @onready var join_hint: Label = $RoomView/JoinHint
@@ -93,6 +93,8 @@ func _refresh_settings_texts() -> void:
 	$SettingsPanel/Rows/RandomWallsRow/Value.text = Loc.t("SETTINGS_ON") if Consts.random_indestructible_walls else Loc.t("SETTINGS_OFF")
 	$SettingsPanel/Rows/PowerupChanceRow/Label.text = Loc.t("SETTINGS_POWERUP_CHANCE")
 	$SettingsPanel/Rows/PowerupChanceRow/Value.text = "%d%%" % Consts.powerup_chance_percent
+	$SettingsPanel/Rows/SuddenDeathRow/Label.text = Loc.t("SETTINGS_SUDDEN_DEATH")
+	$SettingsPanel/Rows/SuddenDeathRow/Value.text = Consts.SUDDEN_DEATH_LABELS[Consts.sudden_death_index]
 	$SettingsPanel/Rows/RoundsRow/Label.text = Loc.t("SETTINGS_ROUNDS")
 	$SettingsPanel/Rows/RoundsRow/Value.text = str(Consts.rounds_per_match())
 	$SettingsPanel/Hint.text = Loc.t("MAP_SETTINGS_HINT")
@@ -142,6 +144,8 @@ func _adjust_setting(delta: int) -> void:
 			Consts.set_random_indestructible_walls(not Consts.random_indestructible_walls)
 		SettingsRow.POWERUP_CHANCE:
 			Consts.set_powerup_chance_percent(Consts.powerup_chance_percent + delta * Consts.POWERUP_CHANCE_STEP)
+		SettingsRow.SUDDEN_DEATH:
+			Consts.set_sudden_death_index(Consts.sudden_death_index + delta)
 		SettingsRow.ROUNDS:
 			Consts.set_rounds_index(Consts.rounds_index + delta)
 	_refresh_settings_texts()

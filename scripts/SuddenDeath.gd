@@ -16,7 +16,6 @@ extends Node
 ## Arena only exposes seal_cell() for it. The scene reloads between rounds, so
 ## the 5-minute clock resets by itself.
 
-const START_AFTER_SECONDS := 300.0
 const START_INTERVAL := 3.0
 const END_INTERVAL := 0.28
 # The ghost never gets more than half-opaque; the jump to a real wall is the
@@ -55,8 +54,10 @@ func _process(delta: float) -> void:
 	if arena == null:
 		return
 	if not _running:
+		if not Consts.is_sudden_death_enabled():
+			return
 		_elapsed += delta
-		if _elapsed >= START_AFTER_SECONDS:
+		if _elapsed >= Consts.sudden_death_timer():
 			_start()
 		return
 

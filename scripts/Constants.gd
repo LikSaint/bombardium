@@ -69,6 +69,20 @@ func rounds_per_match() -> int:
 func set_rounds_index(index: int) -> void:
 	rounds_index = clampi(index, 0, ROUNDS_OPTIONS.size() - 1)
 
+const SUDDEN_DEATH_OPTIONS := [60, 180, 300, 480, 720, 1200, 0] # last 0 means "off"
+const SUDDEN_DEATH_LABELS := ["1", "3", "5", "8", "12", "20", "OFF"]
+const DEFAULT_SUDDEN_DEATH_INDEX := 2 # 300 seconds (5 minutes)
+var sudden_death_index: int = DEFAULT_SUDDEN_DEATH_INDEX
+
+func sudden_death_timer() -> float:
+	return float(SUDDEN_DEATH_OPTIONS[sudden_death_index])
+
+func is_sudden_death_enabled() -> bool:
+	return SUDDEN_DEATH_OPTIONS[sudden_death_index] > 0
+
+func set_sudden_death_index(index: int) -> void:
+	sudden_death_index = clampi(index, 0, SUDDEN_DEATH_OPTIONS.size() - 1)
+
 const DIR_UP := Vector2i(0, -1)
 const DIR_DOWN := Vector2i(0, 1)
 const DIR_LEFT := Vector2i(-1, 0)
