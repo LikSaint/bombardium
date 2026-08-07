@@ -75,7 +75,10 @@ In-match:
 - If your controller disconnects mid-match, your character just stops responding, and a red
   "ОТКЛЮЧЕН" badge appears over their HUD corner portrait so it's clear what happened instead of
   looking like a freeze. Any controller (not necessarily the same physical one) pressing its join
-  button (Space/A) reclaims control — most-recently-dropped player first — starting next round.
+  button (Space/A) reclaims control — most-recently-dropped player first — and that character
+  responds again immediately, mid-round. The reclaiming pad usually comes back under a *different*
+  device index than it had before (SDL hands out a fresh one on re-plug), so the live character
+  re-reads its index from the reconnect signal rather than trusting the one it spawned with.
 - On death, a character picker (portrait + left/right arrows, plus a hotkey hint that reads "A/D" or
   "◄►" depending on whether that player's on keyboard or gamepad) appears at the bottom of the
   screen for that player; change character while the round continues, effective next round. If that
@@ -256,7 +259,6 @@ deleted, so its owner gets the charge back instead of being down a bomb for the 
 
 - Pyro's circle blast doesn't respect line-of-sight occlusion (a block inside the radius doesn't
   shield cells behind it, unlike the cross blast).
-- Reconnecting a controller only restores control starting the *next* round, not instantly.
 - Mine / remote bomb / fire bomb weapon pickups from the brief aren't built.
 - Team color tinting is whole-sprite (see Art pipeline) — not as clean as a clothes-only tint would
   be, but PixelLab doesn't hand back separable layers.

@@ -71,6 +71,8 @@ var active_temp_walls: Array = []
 func _ready() -> void:
 	is_bot = device_id == Consts.DEVICE_BOT
 	add_to_group("players")
+	GameManager.player_disconnected.connect(_on_player_disconnected)
+	GameManager.player_reconnected.connect(_on_player_reconnected)
 	$Portrait.set_character(character_id, Consts.PLAYER_COLORS[(player_id - 1) % Consts.PLAYER_COLORS.size()])
 	_apply_character_passives()
 
@@ -93,8 +95,32 @@ func _apply_character_passives() -> void:
 			speed_level += 1
 	stats_changed.emit()
 
+## GameManager owns the slot->device bookkeeping, but the live character in the
+## arena has its own copy of device_id from spawn time, and nothing used to
+## update it. A pad that came back under a *different* device index (SDL hands
+## out a fresh one on re-plug more often than not) therefore reconnected on
+## paper — slot updated, "ОТКЛЮЧЕН" badge cleared — while the character kept
+## listening to the index that no longer existed, and stayed dead to input
+## until the next round respawned it. It only ever appeared to work when the
+## pad happened to be handed back the same index.
+func _on_player_reconnected(p_id: int, device: int) -> void:
+	if p_id != player_id:
+		return
+	device_id = device
+
+## Also drop the old index on disconnect, rather than keeping it: another pad
+## plugged in afterwards can be handed that very index, and would then drive
+## this orphaned character without ever claiming it.
+func _on_player_disconnected(p_id: int) -> void:
+	if p_id != player_id:
+		return
+	device_id = Consts.DEVICE_NONE
+
+func _is_disconnected() -> bool:
+	return device_id == Consts.DEVICE_NONE
+
 func _input(event: InputEvent) -> void:
-	if not alive:
+	if not alive or _is_disconnected():
 		return
 	if device_id == -1:
 		if event is InputEventKey and event.pressed and not event.echo:
@@ -136,6 +162,8 @@ func _physics_process(delta: float) -> void:
 func _poll_move_dir() -> Vector2i:
 	var x := 0.0
 	var y := 0.0
+	if _is_disconnected():
+		return Vector2i.ZERO
 	if device_id == -1:
 		if Input.is_key_pressed(KEY_A):
 			x -= 1
@@ -167,6 +195,8 @@ func _poll_move_dir() -> Vector2i:
 # key/axis edge, not just whichever axis currently wins the diagonal tie-break.
 func _held_dirs() -> Dictionary:
 	var held := {}
+	if _is_disconnected():
+		return held
 	if device_id == -1:
 		held[Consts.DIR_LEFT] = Input.is_key_pressed(KEY_A)
 		held[Consts.DIR_RIGHT] = Input.is_key_pressed(KEY_D)

@@ -94,7 +94,9 @@ func _refresh_settings_texts() -> void:
 	$SettingsPanel/Rows/PowerupChanceRow/Label.text = Loc.t("SETTINGS_POWERUP_CHANCE")
 	$SettingsPanel/Rows/PowerupChanceRow/Value.text = "%d%%" % Consts.powerup_chance_percent
 	$SettingsPanel/Rows/SuddenDeathRow/Label.text = Loc.t("SETTINGS_SUDDEN_DEATH")
-	$SettingsPanel/Rows/SuddenDeathRow/Value.text = Consts.SUDDEN_DEATH_LABELS[Consts.sudden_death_index]
+	var sd_label := Consts.SUDDEN_DEATH_LABELS[Consts.sudden_death_index]
+	var sd_suffix := " мин" if Loc.lang == "ru" else " min"
+	$SettingsPanel/Rows/SuddenDeathRow/Value.text = sd_label if sd_label == "OFF" else sd_label + sd_suffix
 	$SettingsPanel/Rows/RoundsRow/Label.text = Loc.t("SETTINGS_ROUNDS")
 	$SettingsPanel/Rows/RoundsRow/Value.text = str(Consts.rounds_per_match())
 	$SettingsPanel/Hint.text = Loc.t("MAP_SETTINGS_HINT")

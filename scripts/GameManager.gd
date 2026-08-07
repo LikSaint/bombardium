@@ -48,9 +48,12 @@ func _on_joy_connection_changed(device: int, connected: bool) -> void:
 			player_disconnected.emit(slot["id"])
 			return
 
-# Any controller press claims the most recently orphaned player's slot,
-# taking effect from the next round. Ignored while that controller is
-# already bound to a live slot, so it never steals input from an active player.
+# Any controller press claims the most recently orphaned player's slot, and
+# control resumes immediately — the live character picks the new device index
+# up off player_reconnected (Player._on_player_reconnected), so the claim does
+# not have to wait for the next round's respawn. Ignored while that controller
+# is already bound to a live slot, so it never steals input from an active
+# player.
 func _input(event: InputEvent) -> void:
 	if orphaned_player_stack.is_empty():
 		return
