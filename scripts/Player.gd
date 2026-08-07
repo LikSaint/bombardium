@@ -8,8 +8,9 @@ extends CharacterBody2D
 ## device_id == Consts.DEVICE_BOT means AI-controlled: _bot_think() replaces
 ## both _poll_move_dir() and the bomb button, deciding a move direction and
 ## bombing decision every BOT_DECISION_INTERVAL via simple danger-avoidance +
-## BFS pathing (flee live blasts, else chase the nearest enemy/block, and drop
-## a bomb only when a safe escape route from its own blast still exists).
+## BFS pathing (flee live blasts, else grab a nearby powerup, else chase the
+## nearest enemy/block, and drop a bomb only when a safe escape route from its
+## own blast still exists).
 
 const BombScene := preload("res://scenes/Bomb.tscn")
 const ExplosionScript := preload("res://scripts/Explosion.gd")
@@ -40,6 +41,7 @@ var bot_move_dir: Vector2i = Vector2i.ZERO
 # only casual wandering/bombing-consideration is paced by BOT_DECISION_INTERVAL.
 # Escape timing in _bot_should_bomb() assumes this, so don't throttle fleeing.
 var is_fleeing: bool = false
+const BOT_POWERUP_CHASE_MAX_STEPS := 8 # further than this, a pickup isn't worth abandoning the hunt for
 const BOMB_FUSE_DURATION := 2.0 # must match Bomb.tscn's Timer wait_time
 const BOMB_ESCAPE_SAFETY_MARGIN := 0.4 # buffer so a bomb is never a photo finish
 
@@ -462,6 +464,19 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 	var unsafe: Dictionary = danger.duplicate()
 	for c in hazard:
 		unsafe[c] = true
+	# Powerups outrank both hunting and block-farming: they're a permanent stat
+	# gain, they're on a first-come basis (a rival will take them otherwise),
+	# and walking onto the cell is all it takes (Arena.try_collect_powerup fires
+	# on arrival). Only worth it while it's a short detour, though — chasing one
+	# across the whole arena would leave the bot passive, so anything further
+	# than BOT_POWERUP_CHASE_MAX_STEPS is ignored in favour of the usual hunt.
+	var path: Array = []
+	if not arena.powerups_by_cell.is_empty():
+		var pickup := _bfs_find(current_cell, func(c): return arena.has_powerup_at(c), unsafe)
+		# size() == 1 would mean "already standing on it" (impossible — pickup is
+		# automatic), so require a real step rather than freezing on the spot.
+		if pickup.size() >= 2 and pickup.size() - 1 <= BOT_POWERUP_CHASE_MAX_STEPS:
+			path = pickup
 	var targets := {}
 	for e in _alive_enemies():
 		# An enemy already sharing this cell is not somewhere to walk to. Left in,
@@ -470,8 +485,7 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 		# that way, and with the last players stuck the round could never end.
 		if e.current_cell != current_cell:
 			targets[e.current_cell] = true
-	var path: Array = []
-	if not targets.is_empty():
+	if path.is_empty() and not targets.is_empty():
 		path = _bfs_find(current_cell, func(c): return targets.has(c), unsafe)
 	if path.is_empty():
 		path = _bfs_find(current_cell, func(c):
