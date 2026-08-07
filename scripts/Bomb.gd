@@ -60,13 +60,18 @@ const REMOTE_FUSE_DURATION := 8.0
 ## other as radius powerups come in.
 ##
 ## MINE_ARM_DELAY keeps a freshly planted mine from going off in the face of an
-## opponent already standing there. MINE_TRIP_DELAY is the tell, and it is the
-## difference between a trap and a coin flip: a mine that detonated the instant
-## someone crossed into it would kill anyone who ran past with no way to have
-## played around it. A third of a second is long enough for a player at speed to
-## be through and clear, and far too short to stroll out of.
+## opponent already standing there.
+##
+## MINE_TRIP_DELAY is the tell, and it is the difference between a trap and a
+## coin flip. It is set against how far a player actually travels rather than by
+## feel: base move_duration is 0.3s per cell, and escaping a mine of radius 1
+## means clearing two cells from its centre. At 0.3s the tell bought exactly one
+## cell, so tripping one was death for anybody who was not already leaving —
+## there was nothing to react with. At 0.45s it buys a cell and a half, which
+## lets someone who clipped the edge of the footprint get out and still catches
+## anyone who walked into the middle of it.
 const MINE_ARM_DELAY := 0.6
-const MINE_TRIP_DELAY := 0.3
+const MINE_TRIP_DELAY := 0.45
 
 signal exploded
 
@@ -103,9 +108,11 @@ func _ready() -> void:
 	$AntennaTip.visible = remote
 	if is_mine:
 		# No Timer at all: a mine waits for a footstep, not a clock. It also sits
-		# lower and smaller than a bomb, because something you are meant to walk
-		# over should not look like something you are meant to walk around.
+		# smaller and half-faded compared to a bomb, because something you are
+		# meant to walk over should not look like something you are meant to walk
+		# around — the transparency is what sells it as set into the floor.
 		$BombBody.scale = Vector2.ONE * 0.85
+		$BombBody.modulate.a = MINE_BODY_ALPHA
 		return
 	if remote:
 		$Timer.wait_time = REMOTE_FUSE_DURATION
@@ -334,7 +341,12 @@ func _update_magnet(delta: float) -> void:
 	# a player leaves them unable to stand where they are and hands them to
 	# Player._unstick(), which shoves them clear of the cell — the chase would
 	# spend its last second pushing its own target out of the blast.
-	var offset: Vector2i = arena.world_to_cell(target.position) - cell
+	var target_cell: Vector2i = arena.world_to_cell(target.position)
+	var offset: Vector2i = target_cell - cell
+	# Banding is deliberately measured straight-line rather than along the route
+	# the bomb will actually walk: how close the thing is on screen is what a
+	# player reads and reacts to, and a bomb that went dormant because the way
+	# round was long would look asleep while sitting two cells away.
 	var distance: int = absi(offset.x) + absi(offset.y)
 	if distance <= 1:
 		_magnet_dir = Vector2i.ZERO
@@ -353,7 +365,7 @@ func _update_magnet(delta: float) -> void:
 		return
 	_magnet_step_timer = 0.0
 
-	var step := _magnet_step_toward(offset)
+	var step := _magnet_step_toward(target_cell)
 	_magnet_dir = step # ZERO when stalled, which also clears the leading-edge wedge
 	if step == Vector2i.ZERO:
 		return
@@ -392,23 +404,49 @@ func _grant_catch_bonus() -> void:
 	_magnet_caught = true
 	$Timer.start($Timer.time_left + MAGNET_CATCH_FUSE_BONUS)
 
-## Greedy, not a path search: close the longer axis first and fall back to the
-## other one when that cell is blocked. It will sit stalled against the outside
-## of a dead end instead of walking around, and that is the point — a bomb that
-## solved the maze would be unavoidable, so the arena's own geometry is the
-## counterplay to being hunted.
-func _magnet_step_toward(offset: Vector2i) -> Vector2i:
-	var primary := Vector2i(signi(offset.x), 0)
-	var secondary := Vector2i(0, signi(offset.y))
-	if absi(offset.y) > absi(offset.x):
-		var longer := secondary
-		secondary = primary
-		primary = longer
-	if primary != Vector2i.ZERO and _magnet_can_enter(cell + primary):
-		return primary
-	if secondary != Vector2i.ZERO and _magnet_can_enter(cell + secondary):
-		return secondary
-	return Vector2i.ZERO
+## First step of the shortest route to `target_cell`, or ZERO when there is no
+## route at all.
+##
+## This replaces an axis-greedy step (close the longer axis, fall back to the
+## other when blocked), which was chosen so the bomb would stall on geometry
+## rather than solve it. In practice, around a corner both axes alternate
+## between blocked and open, so the bomb picked a different one every step and
+## visibly jittered on the spot with its heading wedge spinning — it read as a
+## broken object rather than as a threat that had lost you.
+##
+## What made stalling look like the safe default was that nothing else held the
+## mechanic back. The range bands do that now: the bomb is asleep past 8 cells
+## and slower than a player inside them, so it can route properly and still be
+## walked away from. Losing it is a matter of distance, not of hoping it trips
+## over a wall.
+func _magnet_step_toward(target_cell: Vector2i) -> Vector2i:
+	var came_from := {cell: cell}
+	var queue: Array[Vector2i] = [cell]
+	var head := 0
+	var reached := false
+	while head < queue.size():
+		var current: Vector2i = queue[head]
+		head += 1
+		if current == target_cell:
+			reached = true
+			break
+		for dir in Consts.DIRECTIONS:
+			var next: Vector2i = current + dir
+			if came_from.has(next):
+				continue
+			# The target's own cell is the goal, so it counts as reachable even
+			# though somebody is standing on it; every other occupied cell is a
+			# genuine obstacle, which is what lets a player body-block a chase.
+			if next != target_cell and not _magnet_can_enter(next):
+				continue
+			came_from[next] = current
+			queue.append(next)
+	if not reached:
+		return Vector2i.ZERO
+	var node := target_cell
+	while came_from[node] != cell:
+		node = came_from[node]
+	return node - cell
 
 ## Same as _can_enter(), plus: a crawling bomb never climbs onto a living player
 ## — anyone's, very much including the owner's.
@@ -456,23 +494,44 @@ const MAGNET_HALO_PERIOD := 0.9
 ## body rather than over it.
 const MINE_IDLE_COLOR := Color(0.95, 0.72, 0.25)
 const MINE_TRIP_COLOR := Color(1.0, 0.25, 0.2)
+const MINE_BODY_ALPHA := 0.5
 
-## A mine has to advertise itself just enough. It is drawn as a flat ring on the
-## ground rather than a silhouette standing up off it — the shape says "this is
-## floor you may cross", and the colour says crossing it is a decision. Once
-## tripped it strobes on the way out, which is the entire counterplay: the tell
-## has to be impossible to miss even when it is far too short to stroll out of.
+## A mine has to advertise itself just enough. It is drawn flat on the ground
+## rather than as a silhouette standing up off it — the shape says "this is floor
+## you may cross", and the colour says crossing it is a decision. Once tripped it
+## strobes on the way out, which is the entire counterplay: the tell has to be
+## impossible to miss even when it is far too short to stroll out of.
+##
+## The faint diamonds are the mine's own blast cells, walls and crates included,
+## so a radius powerup is visible as the field growing rather than as a number in
+## the corner — and since the trigger *is* the footprint, what is drawn is
+## exactly the ground that sets it off. Opponents can read it too, which is the
+## right trade: the mine is a visible object already, so hiding how far it
+## reaches would only make it feel arbitrary rather than make it more dangerous.
 func _draw_mine() -> void:
-	if _mine_trip_left >= 0.0:
-		var strobe := fmod(_mine_trip_left, 0.1) < 0.05
-		draw_circle(Vector2.ZERO, 15.0, Color(MINE_TRIP_COLOR, 0.45 if strobe else 0.15))
-		draw_arc(Vector2.ZERO, 15.0, 0.0, TAU, 22, Color(MINE_TRIP_COLOR, 1.0 if strobe else 0.4), 2.5)
+	var tripped := _mine_trip_left >= 0.0
+	var armed := _mine_age >= MINE_ARM_DELAY
+	var tint := MINE_TRIP_COLOR if tripped else MINE_IDLE_COLOR
+	var strobe := tripped and fmod(_mine_trip_left, 0.1) < 0.05
+
+	var footprint_alpha := 0.34 if strobe else (0.20 if tripped else (0.15 if armed else 0.06))
+	for c in _blast_cells():
+		if c == cell:
+			continue
+		var at := Vector2(c - cell) * float(Consts.CELL_SIZE)
+		draw_colored_polygon(PackedVector2Array([
+			at + Vector2(0, -10), at + Vector2(10, 0),
+			at + Vector2(0, 10), at + Vector2(-10, 0),
+		]), Color(tint, footprint_alpha))
+
+	if tripped:
+		draw_circle(Vector2.ZERO, 15.0, Color(tint, 0.45 if strobe else 0.15))
+		draw_arc(Vector2.ZERO, 15.0, 0.0, TAU, 22, Color(tint, 1.0 if strobe else 0.4), 2.5)
 		return
 	# Still arming: dim, and no pulse, so it plainly isn't live yet.
-	var armed := _mine_age >= MINE_ARM_DELAY
 	var pulse := 0.35 + 0.25 * absf(sin(Time.get_ticks_msec() / 1000.0 * PI))
-	draw_arc(Vector2.ZERO, 15.0, 0.0, TAU, 22, Color(MINE_IDLE_COLOR, pulse if armed else 0.18), 2.0)
-	draw_arc(Vector2.ZERO, 6.0, 0.0, TAU, 14, Color(MINE_IDLE_COLOR, 0.5 if armed else 0.18), 1.5)
+	draw_arc(Vector2.ZERO, 15.0, 0.0, TAU, 22, Color(tint, pulse if armed else 0.18), 2.0)
+	draw_arc(Vector2.ZERO, 6.0, 0.0, TAU, 14, Color(tint, 0.5 if armed else 0.18), 1.5)
 
 func _draw() -> void:
 	if has_exploded:

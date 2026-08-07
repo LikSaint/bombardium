@@ -90,6 +90,9 @@ const BOT_WALL_MAX_OPEN_NEIGHBOURS := 2 # only wall a chokepoint — on open gro
 const BOT_KICK_MAX_LANE := 10 # cells of slide worth scanning for a target
 const BOT_KICK_MIN_LANE := 2 # a shove that moves the bomb one cell hasn't got it off us
 const BOT_KICK_MIN_FUSE := 0.6 # seconds; below this the bomb goes off mid-shove
+const BOT_MINE_ENEMY_MIN := 3 # closer than this, the charge is better spent as a bomb
+const BOT_MINE_ENEMY_MAX := 7 # further, nobody finds it before the round moves on
+const BOT_MINE_MAX_OPEN_NEIGHBOURS := 3 # a mine in the middle of open ground is just walked past
 
 var move_duration: float = 0.3
 var bomb_count_max: int = 1
@@ -213,6 +216,7 @@ func _apply_character_passives() -> void:
 			# only thing that lifts them out of covering barely their own cell —
 			# and it is worth double to the Miner, whose ordinary bombs grow too.
 			powerup_weights = [1, 3, 1, 1]
+			shield_charges += 1
 	stats_changed.emit()
 
 ## GameManager owns the slot->device bookkeeping, but the live character in the
@@ -505,6 +509,12 @@ func _bot_think() -> void:
 	# leaves the bot free to bomb or wander in the same decision.
 	if character_id == CharacterId.ENGINEER:
 		_bot_try_wall(danger)
+	# A mine, unlike a wall, comes out of the same charges as bombs, so it is
+	# decided first and the bomb check below sees what is actually left. Nothing
+	# has to stop the bot doing both in one decision: a planted mine occupies
+	# this cell, and the bomb branch already refuses an occupied one.
+	if character_id == CharacterId.MINER:
+		_bot_try_mine(danger)
 	if bomb_count_current > 0 and not arena.has_bomb_at(current_cell) and _bot_should_bomb(danger, hazard):
 		place_bomb()
 		is_fleeing = true
@@ -845,6 +855,43 @@ func _bot_try_wall(danger: Dictionary) -> void:
 	if to_enemy.size() < 2 or to_enemy.size() - 1 > BOT_WALL_ENEMY_RANGE:
 		return
 	use_ability()
+
+## Miner mines, bot side. A mine is the opposite ask to a wall: a wall wants a
+## gap nobody can get round, a mine wants ground somebody will actually cross,
+## so this looks for a spot that is neither wide open nor already covered.
+##
+## The distance window is the real judgement. Too close and a mine is strictly
+## worse than the bomb the bot could have spent that charge on — it has to wait
+## for a walk-in that a fight happening right now will not allow. Too far and
+## nobody comes near it before the round moves on, and the charge is gone for
+## nothing. Mines are also never planted on a cell already in someone's blast:
+## a bomb going off there sets the mine off with it, for free.
+func _bot_try_mine(danger: Dictionary) -> void:
+	# The last charge is never spendable on a mine (see _place_ordnance), so
+	# there is no point getting as far as the placement check without two.
+	if ability_on_cooldown or bomb_count_current < 2:
+		return
+	var current_cell := get_current_cell()
+	if danger.has(current_cell) or arena.has_bomb_at(current_cell):
+		return
+	if _open_neighbour_count(current_cell) > BOT_MINE_MAX_OPEN_NEIGHBOURS:
+		return
+	if _has_own_mine_adjacent(current_cell):
+		return
+	var to_enemy := _bfs_find(current_cell, func(c): return _enemy_at(c) != null)
+	if to_enemy.is_empty():
+		return
+	var steps := to_enemy.size() - 1
+	if steps < BOT_MINE_ENEMY_MIN or steps > BOT_MINE_ENEMY_MAX:
+		return
+	use_ability()
+
+func _has_own_mine_adjacent(cell: Vector2i) -> bool:
+	for dir in Consts.DIRECTIONS:
+		var bomb = arena.get_bomb_at(cell + dir)
+		if bomb != null and bomb.is_mine and bomb.owner_player == self:
+			return true
+	return false
 
 func _open_neighbour_count(cell: Vector2i) -> int:
 	var count := 0

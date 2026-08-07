@@ -271,6 +271,7 @@ func get_character_stats(character_id: int) -> Dictionary:
 			stats["shield"] = 1
 		6:  # Miner
 			stats["bombs"] = 2
+			stats["shield"] = 1
 	return stats
 
 enum PowerupType { BOMB_COUNT, RADIUS, SPEED, SHIELD }

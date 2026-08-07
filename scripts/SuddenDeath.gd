@@ -4,11 +4,12 @@ extends Node
 ## and spiralling inward — so a stalemate between cautious survivors can't drag
 ## on forever. The playable area just keeps shrinking until someone is left.
 ##
-## Each wall telegraphs before it lands: a ghost sprite fades up on its cell for
-## exactly as long as the current interval, then snaps to a solid wall. Early on
-## that interval is several seconds, so the ghost is a barely-visible hint that
-## creeps in; by the end it's a fraction of a second and the wall may as well
-## appear instantly. The interval shrinks geometrically (not linearly) between
+## Each wall telegraphs before it lands: a ghost sprite pulses on its cell for
+## exactly as long as the current interval — faint, out, stronger, out, stronger
+## still — and then snaps to a solid wall. Early on that interval is several
+## seconds, so the pulses are a slow, easily-missed hint; by the end it's a
+## fraction of a second and the same three pulses read as an alarm going off.
+## The interval shrinks geometrically (not linearly) between
 ## START_INTERVAL and END_INTERVAL, which is what makes the ring feel like it's
 ## closing slowly and then rushing.
 ##
@@ -21,6 +22,10 @@ const END_INTERVAL := 0.28
 # The ghost never gets more than half-opaque; the jump to a real wall is the
 # whole point of the telegraph, so it has to stay clearly unfinished until then.
 const GHOST_MAX_ALPHA := 0.5
+# Pulses per telegraph. Three reads as a rhythm you can count on ("that's two,
+# it lands on the next one") without turning into a strobe at the end, where the
+# whole interval is barely a quarter of a second.
+const GHOST_PULSES := 3
 # Music creeps up as the walls speed up — a nudge, not a chipmunk.
 const MUSIC_MAX_PITCH := 1.12
 
@@ -63,12 +68,29 @@ func _process(delta: float) -> void:
 
 	_timer += delta
 	if _ghost != null:
-		# Quadratic ease-in: the ghost lingers near-invisible for most of the
-		# wait and only becomes obvious right before it turns solid.
-		var progress: float = clampf(_timer / _interval, 0.0, 1.0)
-		_ghost.modulate.a = GHOST_MAX_ALPHA * progress * progress
+		_ghost.modulate.a = _ghost_alpha(_timer / _interval)
 	if _timer >= _interval:
 		_land()
+
+## The telegraph, as a series of pulses rather than one fade: the cell shows
+## itself faintly, blinks back out, returns a little more solid, blinks out
+## again, and the last pulse holds at its brightest until the wall lands.
+##
+## A single smooth ramp was the obvious thing and the wrong one. It is hardest
+## to see exactly when it matters most — early, at a three-second interval,
+## where a slowly brightening square is indistinguishable from the floor not
+## changing. Something that appears and disappears is caught by peripheral
+## vision even when it is barely there, and each pulse arriving stronger than
+## the last is what says the wall is coming *here*, soon. The final pulse holds
+## rather than blinking out so the wall never lands out of a gap.
+func _ghost_alpha(progress: float) -> float:
+	var phase: float = clampf(progress, 0.0, 1.0) * GHOST_PULSES
+	var index: int = mini(int(phase), GHOST_PULSES - 1)
+	var local: float = phase - float(index)
+	var peak: float = GHOST_MAX_ALPHA * float(index + 1) / float(GHOST_PULSES)
+	if index == GHOST_PULSES - 1:
+		return peak * minf(1.0, local * 2.0)
+	return peak * sin(local * PI)
 
 func _start() -> void:
 	_cells = _build_spiral()
@@ -149,8 +171,15 @@ func _advance() -> void:
 	_ghost.texture = WALL_TEXTURE
 	_ghost.position = arena.cell_to_world(_cells[_index])
 	_ghost.modulate.a = 0.0
-	_ghost.z_index = -1 # under the players, so nobody is hidden by the warning
 	arena.add_child(_ghost)
+	# The warning has to sit above the floor and below everything standing on it.
+	# It used to ask for that with z_index = -1, which is a level *below* the
+	# arena's own _draw() — and since that paints every cell with an opaque
+	# FLOOR_COLOR, the telegraph was covered by the floor and never visible at
+	# all. Ordinary z with the node first among the children is the actual
+	# answer: a parent draws before its children, so this lands on top of the
+	# floor, while being first keeps it under the blocks, bombs and players.
+	arena.move_child(_ghost, 0)
 
 func _land() -> void:
 	var cell: Vector2i = _cells[_index]

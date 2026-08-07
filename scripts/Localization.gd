@@ -32,7 +32,7 @@ const STRINGS := {
 		"CHAR_DESC_PYRO": "Бомбы взрываются кругом и немного пробивают ящики",
 		"CHAR_DESC_BOMB_KICKER": "Толкает бомбы движением — свои и чужие; разгоняется, пока бежит по прямой",
 		"CHAR_DESC_MAGNET": "Его бомбы сами ползут к ближайшему сопернику — медленно, но неотвязно",
-		"CHAR_DESC_MINER": "%s: Ставит мину — по ней ходят, пока не подойдёт чужой. Радиус вдвое меньше, и последний заряд миной не потратить",
+		"CHAR_DESC_MINER": "%s: Часть бомб ставит минами — они взрываются у врага под ногами",
 
 		"MAP_SIZE_TINY": "Крошечная",
 		"MAP_SIZE_SMALL": "Маленькая",
@@ -99,6 +99,7 @@ const STRINGS := {
 		"CHAR_DESC_PYRO": "Bombs explode in a circle and punch through crates a bit",
 		"CHAR_DESC_BOMB_KICKER": "Pushes bombs by walking into them — theirs or anyone's; picks up speed while running in a straight line",
 		"CHAR_DESC_MAGNET": "Their bombs crawl toward the nearest opponent on their own — slowly, but they don't let go",
+		"CHAR_DESC_MINER": "%s: Spends some of their bombs as mines — they go off under an opponent's feet",
 
 		"MAP_SIZE_TINY": "Tiny",
 		"MAP_SIZE_SMALL": "Small",
