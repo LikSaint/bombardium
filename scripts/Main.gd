@@ -9,6 +9,7 @@ const LobbyScenePath := "res://scenes/Lobby.tscn"
 @onready var overlay: ColorRect = $UI/Overlay
 @onready var results_label: Label = $UI/Overlay/ResultsLabel
 @onready var round_timer_label: Label = $UI/Overlay/RoundTimerLabel
+@onready var repick_label: Label = $UI/Overlay/RepickLabel
 @onready var hud_corners: Array = [$UI/HudTopLeft, $UI/HudTopRight, $UI/HudBottomLeft, $UI/HudBottomRight]
 @onready var hotkey_hint: Label = $UI/HotkeyHint
 
@@ -16,7 +17,9 @@ const HOTKEY_HINT_VISIBLE_DURATION := 6.0
 const HOTKEY_HINT_FADE_DURATION := 1.0
 const ROUND_END_DELAY_SECONDS := 3
 
-var _winner_id_for_input: int = 0
+# The winning slot while the post-round overlay is up, so they can re-pick a
+# character before the next round spawns; null at every other time.
+var _winner_slot = null
 
 func _ready() -> void:
 	overlay.visible = false
@@ -44,35 +47,42 @@ func _show_hotkey_hint() -> void:
 	tw.tween_interval(HOTKEY_HINT_VISIBLE_DURATION)
 	tw.tween_property(hotkey_hint, "modulate:a", 0.0, HOTKEY_HINT_FADE_DURATION)
 
+## The round winner may re-pick their character while the next round counts
+## down. Only that player's own device is listened to: the keyboard slot reads
+## left/right, a pad slot reads its own D-pad, and every other event is ignored
+## — otherwise any stray key would spin the selection.
 func _input(event: InputEvent) -> void:
-	if _winner_id_for_input <= 0 or not overlay.visible:
+	if _winner_slot == null or not overlay.visible:
+		return
+	var device: int = _winner_slot["device"]
+	if device == Consts.DEVICE_BOT or device == Consts.DEVICE_NONE:
 		return
 
-	var device_id: int = -1
-	if event is InputEventKey and event.pressed:
+	var delta := 0
+	if device == -1 and event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_LEFT:
-			device_id = -1
+			delta = -1
 		elif event.keycode == KEY_RIGHT:
-			device_id = -1
-
-	if event is InputEventJoypadButton and event.pressed:
+			delta = 1
+	elif device >= 0 and event is InputEventJoypadButton and event.pressed and event.device == device:
 		if event.button_index == JOY_BUTTON_DPAD_LEFT:
-			device_id = event.device
+			delta = -1
 		elif event.button_index == JOY_BUTTON_DPAD_RIGHT:
-			device_id = event.device
+			delta = 1
+	if delta == 0:
+		return
 
-	if device_id == -1:
-		_change_winner_character(event.keycode == KEY_RIGHT if event is InputEventKey else false)
-	elif device_id >= 0:
-		_change_winner_character(event.button_index == JOY_BUTTON_DPAD_RIGHT, device_id)
+	_winner_slot["character_id"] = posmod(_winner_slot["character_id"] + delta, Consts.CHARACTER_COUNT)
+	Sfx.play_menu()
+	_refresh_repick_label()
+	get_viewport().set_input_as_handled()
 
-func _change_winner_character(is_right: bool, device_id: int = -1) -> void:
-	for slot in GameManager.player_slots:
-		if slot["id"] == _winner_id_for_input and (device_id == -1 or slot["device"] == device_id):
-			var delta = 1 if is_right else -1
-			slot["character_id"] = posmod(slot["character_id"] + delta, Consts.CHARACTER_COUNT)
-			Sfx.play("menu_confirm")
-			return
+func _refresh_repick_label() -> void:
+	if _winner_slot == null:
+		repick_label.visible = false
+		return
+	repick_label.visible = true
+	repick_label.text = Loc.t("REPICK_HINT", [Consts.character_name(_winner_slot["character_id"])])
 
 func _fit_camera_to_arena() -> void:
 	var arena_size := Vector2(Consts.GRID_WIDTH * Consts.CELL_SIZE, Consts.GRID_HEIGHT * Consts.CELL_SIZE)
@@ -124,8 +134,16 @@ func _on_round_ended(winner_id: int) -> void:
 	results_label.text = "\n".join(lines)
 	overlay.visible = true
 
-	# Allow winner to change character during countdown
-	_winner_id_for_input = winner_id
+	# The winner gets the countdown to re-pick their character. Skipped when the
+	# match is over (the whole line-up is re-chosen in the lobby anyway) and for
+	# bots or a disconnected pad, which have nobody to press the buttons.
+	_winner_slot = null
+	if not match_over and winner_id > 0:
+		for slot in GameManager.player_slots:
+			if slot["id"] == winner_id and slot["device"] != Consts.DEVICE_BOT and slot["device"] != Consts.DEVICE_NONE:
+				_winner_slot = slot
+				break
+	_refresh_repick_label()
 
 	for seconds_left in range(ROUND_END_DELAY_SECONDS, 0, -1):
 		round_timer_label.text = Loc.t("NEXT_ROUND_IN", [seconds_left])
@@ -136,5 +154,6 @@ func _on_round_ended(winner_id: int) -> void:
 		GameManager.reset_match()
 
 	overlay.visible = false
-	_winner_id_for_input = 0
+	_winner_slot = null
+	repick_label.visible = false
 	get_tree().reload_current_scene()

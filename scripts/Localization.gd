@@ -68,6 +68,7 @@ const STRINGS := {
 		"SCORE_HEADER": "Счёт:",
 		"SCORE_LINE": "Player %d — %d",
 		"NEXT_ROUND_IN": "Следующий раунд через: %d",
+		"REPICK_HINT": "◀ %s ▶  —  можно сменить персонажа",
 
 		"SETTINGS_TITLE": "Настройки",
 		"SETTINGS_LANGUAGE": "Язык",
@@ -131,6 +132,7 @@ const STRINGS := {
 		"SCORE_HEADER": "Score:",
 		"SCORE_LINE": "Player %d — %d",
 		"NEXT_ROUND_IN": "Next round in: %d",
+		"REPICK_HINT": "◀ %s ▶  —  you can change character",
 
 		"SETTINGS_TITLE": "Settings",
 		"SETTINGS_LANGUAGE": "Language",
