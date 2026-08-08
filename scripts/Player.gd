@@ -541,7 +541,19 @@ func _bot_try_character_escape(danger: Dictionary, hazard: Dictionary) -> bool:
 			# its source), so being next to a kickable bomb and being in
 			# danger are the same state. Checking for kicks anywhere below
 			# this branch would be checking a condition that is never true.
-			var kick := _bot_kick_dir()
+			#
+			# Kicking a bomb *nowhere in particular* is only allowed when there
+			# is no way out on foot. Otherwise the bot spent a match undoing its
+			# own work: it bombs a crate, its own bomb makes this cell dangerous
+			# on the very next frame, and with no enemy in any lane the kick fell
+			# through to "any direction at all" and shoved the bomb off the crate
+			# to explode in the open — then it walked back and did it again,
+			# forever. It never needed the kick to survive any of that, because
+			# _bot_should_bomb refuses to place a bomb it cannot walk away from
+			# in the first place.
+			var escape_on_foot := not _bfs_find(get_current_cell(),
+				func(c): return not danger.has(c), hazard).is_empty()
+			var kick := _bot_kick_dir(escape_on_foot)
 			if kick != Vector2i.ZERO:
 				bot_move_dir = kick
 				return true
@@ -953,7 +965,11 @@ func _bot_try_escape_jump(danger: Dictionary, hazard: Dictionary) -> bool:
 ## that is currently threatening it: the kick is an escape that happens to
 ## double as an attack, and directions that also send the bomb at an enemy are
 ## preferred over ones that merely get it away.
-func _bot_kick_dir() -> Vector2i:
+##
+## `only_at_enemies` drops that second kind entirely. The caller passes it
+## whenever walking out is still an option, because a kick that points at nobody
+## buys nothing there and costs the bomb whatever it was about to do.
+func _bot_kick_dir(only_at_enemies: bool = false) -> Vector2i:
 	var current_cell := get_current_cell()
 	if _time_until_forced_detonation() < BOT_KICK_MIN_FUSE:
 		return Vector2i.ZERO
@@ -981,7 +997,7 @@ func _bot_kick_dir() -> Vector2i:
 				return dir
 		if fallback == Vector2i.ZERO:
 			fallback = dir
-	return fallback
+	return Vector2i.ZERO if only_at_enemies else fallback
 
 ## Cells a kicked bomb would travel through, stopping where Bomb._slide_step
 ## does. The last entry is where it comes to rest.
