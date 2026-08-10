@@ -14,8 +14,9 @@ extends CharacterBody2D
 
 const BombScene := preload("res://scenes/Bomb.tscn")
 const ExplosionScript := preload("res://scripts/Explosion.gd")
+const BombScript := preload("res://scripts/Bomb.gd") # for its flight/fuse timings, not to instantiate
 
-enum CharacterId { BOMB_MASTER, SCOUT, ENGINEER, PYRO, BOMB_KICKER, MAGNET, MINER }
+enum CharacterId { BOMB_MASTER, SCOUT, ENGINEER, PYRO, BOMB_KICKER, MAGNET, MINER, GRENADIER }
 
 const MOVE_DEADZONE := 0.35
 
@@ -50,6 +51,21 @@ const SPRINT_MAX_FACTOR := 1.6
 var _sprint_charge: float = 0.0
 var _sprint_dir: Vector2i = Vector2i.ZERO
 
+# How far a kick carries a bomb, in cells. Two is a placement, not a delivery:
+# it clears the cell the Hockey Player is standing in plus one, so a kick is
+# always worth making to save yourself, while landing it *on* somebody means
+# walking up to within a couple of cells of them first. An unlimited slide let
+# the character post bombs across the arena from safety, which is a different
+# (and much duller) character than the one who skates in to do it.
+#
+# Every speed powerup adds a cell, so the stat the kit already runs on buys
+# reach as well as pace, and a fed Hockey Player turns into the long-range
+# threat the base one deliberately isn't. Only picked-up powerups count —
+# `speed_level` starts at 1 here from the passive, and the passive is the 10%
+# legs, not an extra cell.
+const KICK_BASE_DISTANCE := 2
+var kick_distance: int = KICK_BASE_DISTANCE
+
 # Half-extent of the box tested against the grid. Smaller than the cell so a
 # player lined up in a corridor never clips the walls flanking it.
 const PLAYER_HALF_EXTENT := 20.0
@@ -75,6 +91,9 @@ const BOT_HOLD_TIMEOUT_FACTOR := 2.5 # give up on an unreachable target after th
 # only casual wandering/bombing-consideration is paced by BOT_DECISION_INTERVAL.
 # Escape timing in _bot_should_bomb() assumes this, so don't throttle fleeing.
 var is_fleeing: bool = false
+# Enemy mine instance id -> the clock reading at which this bot stops believing
+# it is there. See _bot_remembers_mine.
+var _mine_memory: Dictionary = {}
 const BOT_POWERUP_CHASE_MAX_STEPS := 8 # further than this, a pickup isn't worth abandoning the hunt for
 const BOMB_FUSE_DURATION := 2.0 # must match Bomb.tscn's Timer wait_time
 const BOMB_ESCAPE_SAFETY_MARGIN := 0.4 # buffer so a bomb is never a photo finish
@@ -87,12 +106,83 @@ const BOMB_ESCAPE_SAFETY_MARGIN := 0.4 # buffer so a bomb is never a photo finis
 # doing most of their work, that gap now decides matches.
 const BOT_WALL_ENEMY_RANGE := 5 # steps to the nearest enemy; further and a wall is just litter
 const BOT_WALL_MAX_OPEN_NEIGHBOURS := 2 # only wall a chokepoint — on open ground a wall is walked around
-const BOT_KICK_MAX_LANE := 10 # cells of slide worth scanning for a target
 const BOT_KICK_MIN_LANE := 2 # a shove that moves the bomb one cell hasn't got it off us
 const BOT_KICK_MIN_FUSE := 0.6 # seconds; below this the bomb goes off mid-shove
 const BOT_MINE_ENEMY_MIN := 3 # closer than this, the charge is better spent as a bomb
 const BOT_MINE_ENEMY_MAX := 7 # further, nobody finds it before the round moves on
 const BOT_MINE_MAX_OPEN_NEIGHBOURS := 3 # a mine in the middle of open ground is just walked past
+
+## How long a bot keeps an enemy mine in mind after watching it go into the
+## ground. A mine is only visible while it is being planted (Bomb's
+## MINE_REVEAL_DURATION) and has no fuse, so without a memory that runs out a bot
+## would route around every mine ever laid for the rest of the round — perfect
+## recall of an object nobody can see, which is precisely what a human player
+## does not get.
+##
+## The window is rolled per bot per mine, so two bots forget the same mine at
+## different moments: a field stays live for one of them while another has
+## already started cutting through it, which is what makes a minefield read as a
+## risk they take rather than as a wall they respect.
+const BOT_MINE_MEMORY_MIN := 3.0
+const BOT_MINE_MEMORY_MAX := 10.0
+
+# --- Grenadier -------------------------------------------------------------
+#
+# The launcher is the only ranged attack in the game, so everything below
+# exists to keep it from being artillery.
+#
+# How far a shell goes is the one thing the player controls, and it is decided
+# by how long the ability button is held rather than by aiming:
+#
+#   * A tap throws two cells (GRENADE_MIN_RANGE) and shrinks that shell's blast
+#     to whatever fits in the gap (_grenade_shot_radius), so it is always safe to
+#     take at any radius. Charging therefore buys power as well as reach: the
+#     only way to throw your whole blast is to throw it properly far.
+#   * Holding fills a ring at the Grenadier's feet over GRENADE_CHARGE_TIME and
+#     walks the landing cell out to GRENADE_CHARGED_RANGE, which is the fixed
+#     three cells the character shipped with — far enough to throw over the wall
+#     you are standing behind and short enough that they still have to walk into
+#     the fight to use it.
+#   * Every *bomb* powerup adds a cell to that ceiling: a character with no
+#     bombs to place has nothing else to spend one on (see apply_powerup). Reach
+#     is therefore what a Grenadier grows, and the only upgrade in the game that
+#     grows an ability rather than the body carrying it. Speed stays out of it —
+#     it already buys them what it buys everyone.
+#
+# The ring is snapped to whole cells rather than sweeping smoothly, because
+# what it is reporting is which cell the shell lands on — a smooth fill would
+# imply a precision the grid doesn't have.
+#
+# A shell still costs a bomb charge and still hands it back when it goes off,
+# which is what keeps it inside the same accounting as everyone else's ordnance
+# — but with nothing else drawing on the pool and the cooldown gating the rate,
+# that single base charge is never actually the thing standing in the way. The
+# limits that bite are the cooldown and the range.
+#
+# The cooldown is what limits the rate, and it is the number to move if the
+# character comes out too strong or too dull. At 1.2s on top of the flight, a
+# tapped shot comes round every 1.65s and a long one every ~2s, which is about
+# the pace of everyone else's bombs — half of that read as spamming shells
+# rather than picking shots. It runs from the moment the shell *lands*, not from
+# the moment it is fired — the tube is busy for as long as
+# there is something in the air, and the half second is what you wait after
+# that. Measured the other way, a cooldown shorter than the flight would let a
+# second shell go out while the first was still falling, and two shells in the
+# air at once is a different (much less answerable) character. Since the flight
+# is priced by distance (Bomb.flight_time_for), a long shot also costs more
+# cooldown than a short one, and _throw_grenade re-derives ability_cooldown per
+# shot rather than reading one fixed number.
+const GRENADE_MIN_RANGE := 2
+const GRENADE_CHARGED_RANGE := 3
+const GRENADE_RANGE_PER_BOMB := 1
+const GRENADE_CHARGE_TIME := 0.6
+const GRENADE_COOLDOWN := 1.2
+## Furthest a bot will shell from. It could hold the button as long as anyone,
+## but a bot dropping shells from the far side of its charge every time it saw
+## somebody would read as being sniped by the scenery — bots take the shot they
+## walked up to, and leave the long ones to people.
+const BOT_GRENADE_MAX_RANGE := 5
+const BOT_GRENADE_MIN_BLOCKS := 2
 
 var move_duration: float = 0.3
 var bomb_count_max: int = 1
@@ -114,6 +204,18 @@ var speed_level: int = 0
 
 var ability_cooldown: float = 0.2
 var ability_on_cooldown: bool = false
+
+## Grenadier: seconds the ability button has been held, or -1 when it isn't.
+## Doubles as "is a shot being aimed right now", which is what the ring at the
+## player's feet is drawn from.
+var _charge_time: float = -1.0
+## The countdown behind ability_on_cooldown, kept so the dial can draw how much
+## of it is left. Not the authority on anything — the flag is.
+var _ability_timer: SceneTreeTimer = null
+## Cells the next shell is thrown, handed to _throw_grenade out of band: the
+## cooldown bookkeeping in use_ability() is shared by every character, so the
+## one parameter this shot has can't be an argument to it.
+var _grenade_throw_range: int = 0
 
 # Powerup weight distribution: [BOMB_COUNT, RADIUS, SPEED, SHIELD]
 # Default [1,1,1,1], modified by character type
@@ -181,9 +283,18 @@ func _apply_character_passives() -> void:
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — every bomb is another wall
 		CharacterId.PYRO:
 			shield_charges += 1
-			# RADIUS: the diamond blast grows as an area, not as four arms, so a
-			# radius step is worth several times what it is to anyone else —
-			# radius is the Pyro's power stat and the weights should say so.
+			# RADIUS: a step buys the Pyro six cells of blast where it buys anyone
+			# else four, and it is also what pays for cover — the arms only start
+			# coming through crates at radius 3 and through stone at radius 5 (see
+			# Arena.CRATE_PIERCE_COST). Radius is the Pyro's power stat twice over,
+			# and the weights should say so.
+			#
+			# These were set when the blast was a filled diamond, where a radius
+			# step was worth *quadratically* more and this weighting compounded
+			# into a mid-round Pyro covering a third of a large map. The shape is
+			# linear now (Arena._star_blast_cells), so the weights are merely a
+			# preference again rather than a runaway — but they and the 1.5x are
+			# still the two knobs if the Pyro out-scales the field.
 			powerup_weights = [1, 3, 1, 1]
 			powerup_chance_multiplier = 1.5  # 50% more total powerup chance
 		CharacterId.BOMB_KICKER:
@@ -217,6 +328,19 @@ func _apply_character_passives() -> void:
 			# and it is worth double to the Miner, whose ordinary bombs grow too.
 			powerup_weights = [1, 3, 1, 1]
 			shield_charges += 1
+		CharacterId.GRENADIER:
+			# No legs and no bombs: the launcher replaces them outright (see
+			# _can_place_bombs), so this character starts on the base single
+			# charge and never collects another — one shell in the air is all
+			# the cooldown ever allows anyway, and bomb pickups buy reach
+			# instead (see apply_powerup). The shield is the concession to a
+			# kit whose whole threat has to be walked into range to use: at base
+			# speed there is no getting back out again.
+			shield_charges += 1
+			# Re-derived per shot in _throw_grenade (a long shell is longer in the
+			# air, and the cooldown starts when it lands) — this is the shortest one.
+			ability_cooldown = BombScript.FLIGHT_MIN_DURATION + GRENADE_COOLDOWN
+			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — see the Grenadier section above
 	stats_changed.emit()
 
 ## GameManager owns the slot->device bookkeeping, but the live character in the
@@ -246,28 +370,64 @@ func _is_disconnected() -> bool:
 func _input(event: InputEvent) -> void:
 	if not alive or _is_disconnected():
 		return
+	# The ability button is the one input that is read on release as well as on
+	# press, because the Grenadier's shot is decided by how long it was held
+	# (_ability_input). Bomb and pickup still fire on the press and ignore
+	# everything else, which is what a held button has always meant here.
 	if device_id == -1:
-		if event is InputEventKey and event.pressed and not event.echo:
+		if event is InputEventKey and not event.echo:
 			match event.keycode:
 				KEY_SPACE:
-					place_bomb()
+					_primary_input(event.pressed)
 				KEY_E:
-					use_ability()
+					_ability_input(event.pressed)
 				KEY_Q:
-					pickup_weapon()
+					if event.pressed:
+						pickup_weapon()
 	else:
 		# Which physical button each of these is depends on the pad — see the
 		# face-button notes in PadInput.gd. A pad that reports its bottom button
 		# as JOY_BUTTON_B still gets the bomb on the button the player actually
 		# presses, because Pad learned it from their confirm press in the menus.
-		if event is InputEventJoypadButton and event.device == device_id and event.pressed:
+		if event is InputEventJoypadButton and event.device == device_id:
 			var button: int = event.button_index
 			if button == Pad.primary_button(device_id):
-				place_bomb()
+				_primary_input(event.pressed)
 			elif button == Pad.ability_button(device_id):
-				use_ability()
+				_ability_input(event.pressed)
 			elif button == Pad.pickup_button(device_id):
-				pickup_weapon()
+				if event.pressed:
+					pickup_weapon()
+
+## The bomb button. The Grenadier has nothing to put on the floor — the launcher
+## replaces their bombs outright (see _can_place_bombs) — so for them this is the
+## throw. Everyone else drops a bomb on the press and ignores the release.
+func _primary_input(pressed: bool) -> void:
+	if character_id == CharacterId.GRENADIER:
+		_charge_input(pressed)
+		return
+	if pressed:
+		place_bomb()
+
+## The ability button. The Grenadier has nothing on it: their launcher is a
+## replacement for bombs, not an ability alongside them, so it lives on the bomb
+## button alone (_primary_input) and this one is deliberately dead for them —
+## two buttons doing the same thing invites holding one and tapping the other,
+## which is a charge cancelled by the player's own hands.
+func _ability_input(pressed: bool) -> void:
+	if character_id == CharacterId.GRENADIER:
+		return
+	if pressed:
+		use_ability()
+
+## Press and release of the button that throws. The press starts a charge, the
+## release fires whatever it wound up to, and a tap is simply the shortest
+## possible charge rather than a separate case.
+func _charge_input(pressed: bool) -> void:
+	if pressed:
+		_begin_charge()
+	else:
+		_release_charge()
 
 func _physics_process(delta: float) -> void:
 	if not alive or arena == null:
@@ -291,6 +451,16 @@ func _physics_process(delta: float) -> void:
 	# that takes priority over input for as long as it lasts.
 	if not _can_stand_at(position):
 		_unstick(delta)
+		return
+
+	# A charged shot is taken from where it was started. Turning still works —
+	# the launcher is aimed by facing — but the feet are planted: a Grenadier who
+	# could stroll around at full charge would be walking a mortar into position
+	# with the shot already loaded, and the one tell anybody gets (the dial at
+	# their feet) would be attached to a moving target.
+	if _charge_time >= 0.0:
+		_sprint_charge = 0.0
+		$Portrait.set_walking(false)
 		return
 
 	_update_sprint(dir, delta)
@@ -434,8 +604,13 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 	# arena's outer ring, because those still fail the landing check below —
 	# no separate case needed, the same two-cell hop that lands past a single
 	# wall simply lands on more wall.
+	# A chasm is jumpable for the same reason stone is: it's a one-cell obstacle
+	# with open ground on the far side. On the layouts built around water this is
+	# the Parkour Runner's whole edge — the only character who can cross without
+	# a bridge, and so the only one a blown bridge doesn't strand.
 	var is_permanent_wall: bool = arena.is_wall(mid_cell) and not arena.is_temp_wall(mid_cell)
-	if not arena.is_block(mid_cell) and not arena.has_bomb_at(mid_cell) and not is_foreign_temp_wall and not is_permanent_wall:
+	if not arena.is_block(mid_cell) and not arena.has_bomb_at(mid_cell) and not is_foreign_temp_wall \
+			and not is_permanent_wall and not arena.is_pit(mid_cell):
 		return
 	if not arena.is_walkable_for(target_cell, self):
 		return
@@ -461,6 +636,25 @@ func _bot_update(delta: float) -> Vector2i:
 	# full tilt clears a cell in well under one BOT_DECISION_INTERVAL.
 	if character_id == CharacterId.BOMB_MASTER:
 		_bot_try_detonate()
+
+	# Incoming shell. Unlike everything else a bot reacts to, this one cannot
+	# wait for the next decision — a shell lands in well under one interval, and
+	# the bot may also be part way through walking *into* where it lands. So the
+	# held heading is thrown away and a decision is forced this frame; the flee
+	# in _bot_think takes it from there, and the wander it falls through to
+	# already refuses to path into a danger cell.
+	#
+	# This runs even while already fleeing something else, which is the whole
+	# point of putting it above the held-heading return: a bot mid-step toward
+	# the cell a shell is about to land on is exactly the case a shot is aimed
+	# at, and it would otherwise walk the last stride into the blast before
+	# looking up.
+	var shells := _incoming_shell_cells()
+	if not shells.is_empty() and (shells.has(get_current_cell())
+			or (bot_move_dir != Vector2i.ZERO and shells.has(bot_target_cell))):
+		bot_move_dir = Vector2i.ZERO
+		bot_hold_time = 0.0
+		bot_decision_timer = 0.0
 
 	# A decision is a *cell* to walk to, but movement is now continuous, so the
 	# heading has to be held until the bot actually arrives — returning it for
@@ -492,6 +686,7 @@ func _bot_think() -> void:
 	if arena == null:
 		return
 	var current_cell := get_current_cell()
+	_forget_dead_mines()
 	var danger := _compute_danger_cells()
 	var hazard := _compute_active_hazard_cells()
 	if danger.has(current_cell) or hazard.has(current_cell):
@@ -515,7 +710,15 @@ func _bot_think() -> void:
 	# this cell, and the bomb branch already refuses an occupied one.
 	if character_id == CharacterId.MINER:
 		_bot_try_mine(danger)
-	if bomb_count_current > 0 and not arena.has_bomb_at(current_cell) and _bot_should_bomb(danger, hazard):
+	# Same reasoning as the mine: a shell is a charge, so it is spent before the
+	# bomb branch counts what is left. Unlike the mine it also needs the bot
+	# turned the right way, which is why it is decided here rather than folded
+	# into _bot_should_bomb — the shot and the walking heading disagree about
+	# where this bot is facing, and the shot wins for exactly one frame.
+	if character_id == CharacterId.GRENADIER:
+		_bot_try_grenade()
+	if _can_place_bombs() and bomb_count_current > 0 and not arena.has_bomb_at(current_cell) \
+			and _bot_should_bomb(danger, hazard):
 		place_bomb()
 		is_fleeing = true
 		_bot_flee(_compute_danger_cells(), _compute_active_hazard_cells())
@@ -559,26 +762,14 @@ func _bot_try_character_escape(danger: Dictionary, hazard: Dictionary) -> bool:
 				return true
 	return false
 
-func _blast_cells_for(cell: Vector2i, radius: int, is_circle: bool) -> Dictionary:
-	var cells := {cell: true}
-	if is_circle:
-		for dx in range(-radius, radius + 1):
-			for dy in range(-radius, radius + 1):
-				if abs(dx) + abs(dy) > radius:
-					continue
-				var c: Vector2i = cell + Vector2i(dx, dy)
-				if arena.in_bounds(c) and not arena.is_wall(c):
-					cells[c] = true
-	else:
-		for dir in Consts.DIRECTIONS:
-			for i in range(1, radius + 1):
-				var c: Vector2i = cell + dir * i
-				if not arena.in_bounds(c) or arena.is_wall(c):
-					break
-				cells[c] = true
-				if arena.is_block(c):
-					break
-	return cells
+## The bot's read on a blast — a live bomb's, or one it is thinking about
+## planting (see _bot_wants_to_plant). Handed straight to the arena rather than
+## worked out here, because a bot that models the blast even slightly
+## differently from the blast is a bot that takes cover in fire: the old copy of
+## this let a Pyro's diamond through walls, so bots both feared cover that was
+## in fact safe and trusted crates that were in fact about to be shot through.
+func _blast_cells_for(cell: Vector2i, radius: int, is_star: bool) -> Dictionary:
+	return arena.blast_cells(cell, radius, is_star)
 
 ## Cells inside a live (not yet exploded) bomb's blast footprint. These are
 ## a *future* threat — the multi-second fuse means walking through one while
@@ -587,9 +778,66 @@ func _compute_danger_cells() -> Dictionary:
 	var danger := {}
 	for bomb_cell in arena.bombs_by_cell.keys():
 		var bomb = arena.bombs_by_cell[bomb_cell]
-		for c in _blast_cells_for(bomb_cell, bomb.radius, bomb.is_circle_blast):
+		# A forgotten mine is not merely un-feared, it is *not there* as far as
+		# this bot is concerned: leaving its footprint out of the danger map is
+		# what lets the bot walk in, stand on it and take the hit.
+		if bomb.is_mine and not _bot_remembers_mine(bomb):
+			continue
+		for c in _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast):
 			danger[c] = true
+	# A shell in the air is not on the grid and so never appears in
+	# bombs_by_cell (see Bomb._ready), but it is drawn overhead with a ring
+	# around the cell it is coming down on for its whole flight. A bot that
+	# ignored it would be the only one in the arena who couldn't see it coming —
+	# the danger is public, so it belongs on this map like any bomb.
+	for c in _incoming_shell_cells():
+		danger[c] = true
 	return danger
+
+## Ground that a shell already in the air is about to land on, from every
+## player's live_bombs — its own index, since a thrown bomb is deliberately kept
+## off the grid.
+##
+## Split out of _compute_danger_cells because _bot_update asks this every frame
+## while the rest of the danger map is only worth rebuilding once per decision:
+## a shell is in the air for less time than one decision interval, so a bot that
+## waited its turn to look would be informed of the shot by the explosion.
+func _incoming_shell_cells() -> Dictionary:
+	var cells := {}
+	for p in get_tree().get_nodes_in_group("players"):
+		for bomb in p.live_bombs:
+			if not is_instance_valid(bomb) or not bomb.thrown or bomb.has_exploded:
+				continue
+			for c in _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast):
+				cells[c] = true
+	return cells
+
+## Whether this bot still believes an enemy mine is where it saw one go in.
+##
+## A mine it can see right now — mid-plant, or already tripped — is never
+## forgotten; there is no memory involved in looking at something. Everything
+## else runs down a window rolled the first time the bot lost sight of that
+## particular mine, and when the window closes the ground reads as empty again.
+##
+## Its own mines are always remembered. They can't trip under their owner, but a
+## chain reaction sets them off like anything else, and a field you laid yourself
+## is not something you can be surprised by.
+func _bot_remembers_mine(bomb) -> bool:
+	if bomb.owner_player == self or bomb.is_mine_visible():
+		return true
+	var key: int = bomb.get_instance_id()
+	var now: float = Time.get_ticks_msec() / 1000.0
+	if not _mine_memory.has(key):
+		_mine_memory[key] = now + randf_range(BOT_MINE_MEMORY_MIN, BOT_MINE_MEMORY_MAX)
+	return now < _mine_memory[key]
+
+## Mines are the one bomb that can outlive several of its own kind — no fuse, no
+## chain unless something reaches it — so the memory would otherwise accumulate a
+## key per mine per round.
+func _forget_dead_mines() -> void:
+	for key in _mine_memory.keys():
+		if not is_instance_id_valid(key):
+			_mine_memory.erase(key)
 
 ## Cells covered by a currently-live Explosion node — lethal *right now*, on
 ## contact, not a future threat. A bomb's entry disappears from
@@ -679,12 +927,20 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 # other bomb: while a mine has most of its fuse left it is simply never the
 # soonest threat and changes nothing, and once it is genuinely about to go off
 # it should tighten the budget exactly as a short fuse does.
+#
+# Mines are the one bomb that genuinely has no clock: their Timer is never
+# started, so reading time_left off one reports 0 and would tell the bot it has
+# no time at all to escape — which is how a Miner bot standing on the mine it
+# just planted ended up unable to place a bomb ever again. A mine waits for a
+# footstep instead, and that is already priced in through the danger map.
 func _time_until_forced_detonation() -> float:
 	var current_cell := get_current_cell()
 	var soonest := BOMB_FUSE_DURATION
 	for bomb_cell in arena.bombs_by_cell.keys():
 		var bomb = arena.bombs_by_cell[bomb_cell]
-		if not _blast_cells_for(bomb_cell, bomb.radius, bomb.is_circle_blast).has(current_cell):
+		if bomb.is_mine:
+			continue
+		if not _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast).has(current_cell):
 			continue
 		soonest = min(soonest, bomb.get_node("Timer").time_left)
 	return soonest
@@ -829,7 +1085,7 @@ func _bot_try_detonate() -> void:
 	for bomb in live_bombs:
 		if not is_instance_valid(bomb) or bomb.has_exploded:
 			continue
-		var blast := _blast_cells_for(bomb.cell, bomb.radius, bomb.is_circle_blast)
+		var blast := _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast)
 		if blast.has(current_cell):
 			self_in_blast = true
 		for c in blast:
@@ -898,6 +1154,64 @@ func _bot_try_mine(danger: Dictionary) -> void:
 		return
 	use_ability()
 
+## The launcher, bot side. Every other ability here is used *where the bot
+## already is*; this one has to be aimed, and a bot's facing is a side effect of
+## wherever it last walked. So this picks the direction outright and turns to it
+## — the turn is part of the shot, and it costs nothing, since the shell's
+## landing cell is fixed the instant it leaves the tube.
+##
+## An enemy in the blast ends the search immediately: there is no better use of
+## a charge, and a shot that lands on somebody is the entire reason to bring
+## this character. Crates are the fallback and are held to a higher bar
+## (BOT_GRENADE_MIN_BLOCKS), because farming them is what the bot's ordinary
+## bombing already does perfectly well from underneath.
+##
+## The one hard rule is that the bot never fires on ground it is standing in the
+## blast of. That cannot happen at the radius the shell is normally throwing
+## (halved, against a fixed three cells of range) but it is the failure the
+## character is one powerup away from, and a bot walking into its own shellfire
+## would look like the ability being broken rather than misused.
+func _bot_try_grenade() -> void:
+	if ability_on_cooldown or bomb_count_current < 1:
+		return
+	var current_cell := get_current_cell()
+	var reach: int = mini(_grenade_max_range(), BOT_GRENADE_MAX_RANGE)
+	var best_dir := Vector2i.ZERO
+	var best_range := 0
+	var best_blocks := 0
+	for dir in Consts.DIRECTIONS:
+		# Nearest first, so a bot that can reach the same target at two ranges
+		# takes the shorter shot — it lands sooner and costs less cooldown.
+		for cells in range(_grenade_min_range(), reach + 1):
+			var landing := _grenade_landing_cell(dir, cells)
+			if landing == INVALID_CELL:
+				continue
+			var blast := _blast_cells_for(landing, _grenade_shot_radius(cells), false)
+			if blast.has(current_cell):
+				continue
+			var blocks := 0
+			for c in blast:
+				if _enemy_at(c) != null:
+					_bot_fire_grenade(dir, cells)
+					return
+				if arena.is_block(c):
+					blocks += 1
+			if blocks > best_blocks:
+				best_blocks = blocks
+				best_dir = dir
+				best_range = cells
+	if best_blocks >= BOT_GRENADE_MIN_BLOCKS:
+		_bot_fire_grenade(best_dir, best_range)
+
+## Bots don't hold the button — they name the range outright and fire. The turn
+## is free: the shell's landing cell is fixed the instant it leaves the tube, so
+## facing the shot and walking somewhere else next frame costs nothing.
+func _bot_fire_grenade(dir: Vector2i, cells: int) -> void:
+	facing_dir = dir
+	$Portrait.face(dir)
+	_grenade_throw_range = cells
+	use_ability()
+
 func _has_own_mine_adjacent(cell: Vector2i) -> bool:
 	for dir in Consts.DIRECTIONS:
 		var bomb = arena.get_bomb_at(cell + dir)
@@ -942,7 +1256,7 @@ func _bot_try_escape_jump(danger: Dictionary, hazard: Dictionary) -> bool:
 		# escape at all, since the generic flee/wander pathing treats stone as
 		# equally solid whichever kind it is.
 		var mid_is_wall: bool = arena.is_wall(mid) and not arena.is_temp_wall(mid)
-		if not arena.is_block(mid) and not arena.has_bomb_at(mid) and not mid_is_wall:
+		if not arena.is_block(mid) and not arena.has_bomb_at(mid) and not mid_is_wall and not arena.is_pit(mid):
 			continue
 		if not arena.is_walkable_for(landing, self):
 			continue
@@ -986,7 +1300,7 @@ func _bot_kick_dir(only_at_enemies: bool = false) -> Vector2i:
 		# back at the bot — a bomb shoved down a short lane can end up with
 		# this cell inside its blast all over again.
 		var resting: Vector2i = lane[lane.size() - 1]
-		var resting_blast := _blast_cells_for(resting, bomb.radius, bomb.is_circle_blast)
+		var resting_blast := _blast_cells_for(resting, bomb.radius, bomb.is_star_blast)
 		if resting_blast.has(current_cell):
 			continue
 		for c in lane:
@@ -1000,12 +1314,13 @@ func _bot_kick_dir(only_at_enemies: bool = false) -> Vector2i:
 	return Vector2i.ZERO if only_at_enemies else fallback
 
 ## Cells a kicked bomb would travel through, stopping where Bomb._slide_step
-## does. The last entry is where it comes to rest.
+## does — obstacles first, then `kick_distance`, which is the same bound the
+## real kick runs on. The last entry is where it comes to rest.
 func _slide_lane(from: Vector2i, dir: Vector2i) -> Array:
 	var lane: Array = []
 	var c: Vector2i = from + dir
-	while lane.size() < BOT_KICK_MAX_LANE:
-		if not arena.in_bounds(c) or arena.is_wall(c) or arena.is_block(c) or arena.has_bomb_at(c):
+	while lane.size() < kick_distance:
+		if not arena.in_bounds(c) or arena.is_wall(c) or arena.is_block(c) or arena.has_bomb_at(c) or arena.is_pit(c):
 			break
 		lane.append(c)
 		c += dir
@@ -1131,7 +1446,7 @@ func _try_kick_ahead(dir: Vector2i) -> void:
 	var ahead: Vector2i = arena.world_to_cell(position + Vector2(dir) * (PLAYER_HALF_EXTENT + 2.0))
 	var bomb = arena.get_bomb_at(ahead)
 	if bomb != null and not bomb.is_sliding:
-		bomb.start_slide(dir)
+		bomb.start_slide(dir, kick_distance)
 		Sfx.play("bomb_kick")
 		_play_kick_anim()
 
@@ -1195,7 +1510,15 @@ func _scripted_move_to(target_pos: Vector2, duration: float) -> void:
 		$Portrait.set_walking(false)
 	)
 
+## Whether this character puts bombs on the floor at all. The Grenadier does
+## not: the launcher is what replaces them, and their charges are shells in the
+## air rather than bombs they are carrying.
+func _can_place_bombs() -> bool:
+	return character_id != CharacterId.GRENADIER
+
 func place_bomb() -> void:
+	if not _can_place_bombs():
+		return
 	_place_ordnance(false)
 
 ## Bombs and the Miner's mines come out of one pool, not two, so seeding ground
@@ -1225,19 +1548,262 @@ func _place_ordnance(as_mine: bool) -> bool:
 	bomb.radius = maxi(1, bomb_radius / 2) if as_mine else bomb_radius
 	# A mine is its own kind of ordnance — it never also inherits the character
 	# passive that shapes that player's ordinary bombs.
-	bomb.is_circle_blast = not as_mine and character_id == CharacterId.PYRO
+	bomb.is_star_blast = not as_mine and character_id == CharacterId.PYRO
 	bomb.remote = not as_mine and character_id == CharacterId.BOMB_MASTER
 	bomb.magnetic = not as_mine and character_id == CharacterId.MAGNET
-	bomb.position = arena.cell_to_world(current_cell)
-	arena.add_child(bomb)
-	bomb.exploded.connect(_on_owned_bomb_exploded.bind(bomb))
-	live_bombs.append(bomb)
-	bomb_count_current -= 1
+	_commit_ordnance(bomb, current_cell, arena.cell_to_world(current_cell))
 	# The bomb lands under the player's feet — it only becomes solid for them
 	# once they've walked clear of it (see _release_cleared_bombs).
 	_bomb_grace[current_cell] = true
 	Sfx.play("wall_place" if as_mine else "bomb_place")
 	return true
+
+## Hands a freshly built bomb to the arena and pays for it out of this player's
+## charges. Everything a bomb needs regardless of how it got where it is going —
+## placed underfoot, or fired there — which is why `at_cell` and the position it
+## starts at are separate arguments: a thrown shell spends its flight at the
+## muzzle it left and `at_cell` is where it will come down.
+func _commit_ordnance(bomb: Node, at_cell: Vector2i, world_pos: Vector2) -> void:
+	bomb.cell = at_cell
+	bomb.arena = arena
+	bomb.owner_player = self
+	bomb.position = world_pos
+	arena.add_child(bomb)
+	bomb.exploded.connect(_on_owned_bomb_exploded.bind(bomb))
+	live_bombs.append(bomb)
+	bomb_count_current -= 1
+
+## The Grenadier's shot. Costs a charge like anything else out of the pool, and
+## unlike a mine it may be the last one: a shell always goes off, so spending
+## the last charge on one is a second of being unarmed rather than a round of
+## it.
+func _throw_grenade() -> bool:
+	if arena == null or bomb_count_current < 1:
+		return false
+	var from := get_current_cell()
+	var landing := _grenade_landing_cell(facing_dir, maxi(_grenade_throw_range, _grenade_min_range()))
+	if landing == INVALID_CELL:
+		return false
+	var cells: int = absi(landing.x - from.x) + absi(landing.y - from.y)
+	var radius := _grenade_shot_radius(cells)
+	# Belt and braces on top of that cap: the arena is what decides where a blast
+	# really reaches, and a shot that would still come back to us is not taken.
+	if arena.blast_cells(landing, radius, false).has(from):
+		return false
+	var bomb := BombScene.instantiate()
+	bomb.thrown = true
+	bomb.radius = radius
+	# The cooldown is counted from impact, and impact is further away for a long
+	# shot than a short one — so it is priced here, per shot, rather than once in
+	# the passives.
+	ability_cooldown = BombScript.flight_time_for(cells) + GRENADE_COOLDOWN
+	_commit_ordnance(bomb, landing, position)
+	Sfx.play("bomb_kick", 0.7)
+	return true
+
+# --- Charging the shot -----------------------------------------------------
+
+## Nearest cell the launcher throws to. A flat two, rather than "one past your
+## own blast": it is the shell's radius that gives way to keep a short throw safe
+## (see _grenade_shot_radius), so a Grenadier with a big blast still lobs one
+## right in front of themselves instead of being pushed further and further out
+## by their own upgrades.
+func _grenade_min_range() -> int:
+	return GRENADE_MIN_RANGE
+
+## Furthest, at a full charge: the range the character shipped with, plus a cell
+## for every bomb powerup collected — the stat a Grenadier has no other use for
+## (see apply_powerup). Speed is deliberately not in here: it already buys them
+## the thing it buys everyone, and a character who is planted while charging has
+## no business turning legs into artillery range as well.
+func _grenade_max_range() -> int:
+	return maxi(_grenade_min_range(), GRENADE_CHARGED_RANGE + bomb_level * GRENADE_RANGE_PER_BOMB)
+
+## 0..1 through the hold, linear in time. The one thing both the dial (which
+## wants the raw fraction, to paint in smoothly rather than snap cell to cell)
+## and _charged_range (which wants it rounded) read off the same clock.
+func _charge_fraction() -> float:
+	return clampf(_charge_time / GRENADE_CHARGE_TIME, 0.0, 1.0)
+
+## How far the shot currently being held would go, in cells. Rounded to a whole
+## cell — the shell always lands on one — even though the dial that shows this
+## charging fills smoothly rather than snapping the moment a cell is crossed.
+func _charged_range() -> int:
+	var low := _grenade_min_range()
+	var high := _grenade_max_range()
+	if high <= low or _charge_time <= 0.0:
+		return low
+	return low + int(round(_charge_fraction() * (high - low)))
+
+func _begin_charge() -> void:
+	if _charge_time >= 0.0:
+		return
+	# Refusing to start rather than swallowing the release: with nothing to
+	# throw, the button does nothing at all and no dial appears to promise
+	# otherwise.
+	if ability_on_cooldown or bomb_count_current < 1:
+		return
+	_charge_time = 0.0
+	queue_redraw()
+
+func _release_charge() -> void:
+	if _charge_time < 0.0:
+		return
+	_grenade_throw_range = _charged_range()
+	_charge_time = -1.0
+	queue_redraw()
+	use_ability()
+
+func _cancel_charge() -> void:
+	if _charge_time < 0.0:
+		return
+	_charge_time = -1.0
+	queue_redraw()
+
+func _process(delta: float) -> void:
+	if _charge_time >= 0.0:
+		if not alive or _is_disconnected():
+			_cancel_charge()
+		else:
+			_charge_time += delta
+	# The dial stays on screen through the cooldown as well, so the redraw has to
+	# outlast the charge that put it there.
+	if _charge_time >= 0.0 or (character_id == CharacterId.GRENADIER and ability_on_cooldown):
+		queue_redraw()
+
+const CHARGE_RING_RADIUS := 26.0
+const CHARGE_RING_COLOR := Color(1.0, 0.55, 0.18, 0.75)
+const CHARGE_RING_TRACK_COLOR := Color(0.0, 0.0, 0.0, 0.4)
+const CHARGE_RING_EDGE_COLOR := Color(0.12, 0.09, 0.06, 0.8)
+## Down at the boots rather than around the waist, so the dial reads as being on
+## the ground the shell is being measured across.
+const CHARGE_RING_CENTRE := Vector2(0.0, 8.0)
+
+const COOLDOWN_DIAL_COLOR := Color(0.85, 0.2, 0.16, 0.7)
+
+## The dial under the Grenadier's feet, in its two states.
+##
+## Charging, it is a disc that paints in **clockwise** from twelve o'clock,
+## smoothly rather than snapping cell to cell — the hold is continuous, so the
+## fill reads that way too, with the actual throw only rounding to a cell at
+## the moment it's released. The spokes are drawn over it regardless, one per
+## cell of extra range, so what the sweep is *worth* is still legible while
+## it's moving: a full circle of colour is the longest throw this Grenadier
+## has. A full charge pulses, because the moment worth knowing about is the one
+## where holding on stops buying anything.
+##
+## On cooldown it is the same disc in red, unwinding **anticlockwise** — the
+## charge running backwards, which is exactly what a cooldown is. The two can
+## never be on screen together (a charge is refused while the launcher is hot),
+## so the direction and the colour together say which of the two you are looking
+## at without having to read any of it.
+func _draw() -> void:
+	if _charge_time >= 0.0:
+		_draw_charge_dial()
+	elif character_id == CharacterId.GRENADIER and ability_on_cooldown:
+		_draw_cooldown_dial()
+
+func _draw_charge_dial() -> void:
+	var low := _grenade_min_range()
+	var high := _grenade_max_range()
+	var steps: int = high - low
+	draw_circle(CHARGE_RING_CENTRE, CHARGE_RING_RADIUS, CHARGE_RING_TRACK_COLOR)
+	if steps <= 0:
+		_draw_dial_rim()
+		return
+	var fraction := _charge_fraction()
+	var top := -PI / 2.0
+	var tint := CHARGE_RING_COLOR
+	if fraction >= 1.0:
+		tint.a = 0.55 + 0.35 * absf(sin(Time.get_ticks_msec() / 1000.0 * 6.0))
+	if fraction > 0.0:
+		_draw_dial_slice(top, TAU * fraction, tint)
+	for i in range(1, steps):
+		var a: float = top + TAU * i / steps
+		draw_line(CHARGE_RING_CENTRE, CHARGE_RING_CENTRE + Vector2(cos(a), sin(a)) * CHARGE_RING_RADIUS,
+			CHARGE_RING_EDGE_COLOR, 1.5)
+	_draw_dial_rim()
+
+## What is left of the cooldown, not what has elapsed: the red drains away and
+## the dial is empty at the moment the launcher is ready again, so "nothing on
+## the ground under them" is the same signal as "can shoot".
+##
+## Drawn with the same clockwise-from-top slice as the charge dial, just fed
+## `left` instead of a filled fraction — the two calls are structurally
+## identical, so the cooldown is exactly the charge animation played with time
+## reversed, and it retreats anticlockwise as a direct consequence rather than
+## from a separately-chosen sign. (A slice that starts full at `left == 1` and
+## is swept out with a *negative* angle instead retreats in the same clockwise
+## sense the charge fills in — which reads as one continuous rotation across a
+## charge/cooldown pair rather than as the two opposite winds they are.)
+func _draw_cooldown_dial() -> void:
+	if _ability_timer == null or ability_cooldown <= 0.0:
+		return
+	var left := clampf(_ability_timer.time_left / ability_cooldown, 0.0, 1.0)
+	if left <= 0.0:
+		return
+	draw_circle(CHARGE_RING_CENTRE, CHARGE_RING_RADIUS, CHARGE_RING_TRACK_COLOR)
+	_draw_dial_slice(-PI / 2.0, TAU * left, COOLDOWN_DIAL_COLOR)
+	_draw_dial_rim()
+
+func _draw_dial_rim() -> void:
+	draw_arc(CHARGE_RING_CENTRE, CHARGE_RING_RADIUS, 0.0, TAU, 40, CHARGE_RING_EDGE_COLOR, 1.5)
+
+## A filled pie slice of the dial: a fan of triangles out of the centre, since
+## Godot draws arcs as strokes and there is no filled-arc primitive. A negative
+## `sweep` runs anticlockwise.
+func _draw_dial_slice(from_angle: float, sweep: float, colour: Color) -> void:
+	var segments: int = maxi(3, int(ceil(absf(sweep) / TAU * 40.0)))
+	var points := PackedVector2Array([CHARGE_RING_CENTRE])
+	for i in range(segments + 1):
+		var a: float = from_angle + sweep * i / segments
+		points.append(CHARGE_RING_CENTRE + Vector2(cos(a), sin(a)) * CHARGE_RING_RADIUS)
+	draw_colored_polygon(points, colour)
+
+## Blast of a shell thrown `cells` away: whatever the launcher has, but never
+## enough of it to reach back to the person who fired it.
+##
+## This is what makes a tap safe at any radius. A shell landing two cells away
+## can only ever be a radius-1 blast, three cells buys radius 2, and so on — so
+## charging buys reach and power together, a close shot is deliberately a small
+## one, and the way to throw your whole blast is to throw it properly far.
+func _grenade_shot_radius(cells: int) -> int:
+	return clampi(_grenade_radius(), 1, maxi(1, cells - 1))
+
+## A shell always covers its own cell, and grows by half of whatever radius its
+## thrower has picked up — so a radius powerup is worth exactly half as much to
+## the launcher as it is to the bombs this player puts on the floor.
+##
+## Halving it is what keeps the shot from reaching back down its own three cells
+## of range: at full radius the blast would be killing the Grenadier from two
+## powerups in, which turns a pickup everyone else wants into one that breaks
+## this character's only ability. It is still possible to grow into it — four
+## radius powerups puts the far edge of the blast on the tube it came out of —
+## but by then it is a choice about a stat that has already paid for itself
+## several times over, not a trap sprung on someone who took the second one.
+func _grenade_radius() -> int:
+	return 1 + (bomb_radius - 1) / 2
+
+## Where a shell fired along `dir` comes down: exactly the cell it was aimed at.
+##
+## Nothing in between stops it — crates, water, bombs, people and stone are all
+## flown over, which is the whole point of the arc — and nothing at the far end
+## stops it either. A shell aimed at a wall goes off *on* the wall, its blast
+## spreading out of the impact into whatever open ground is beside it. It used
+## to walk the landing cell back to the last non-wall cell instead, which is
+## tidier in the abstract and unreadable in play: on the default checkerboard,
+## aiming along an even row meant the shell quietly landed a cell nearer than the
+## dial had just promised, for a reason nothing on screen explained.
+##
+## The one thing still walked back is the edge of the map, since out there is no
+## cell to land on at all.
+func _grenade_landing_cell(dir: Vector2i, max_cells: int) -> Vector2i:
+	var from := get_current_cell()
+	for i in range(max_cells, 0, -1):
+		var c: Vector2i = from + dir * i
+		if arena.in_bounds(c):
+			return c
+	return INVALID_CELL
 
 func _on_owned_bomb_exploded(bomb: Node) -> void:
 	live_bombs.erase(bomb)
@@ -1254,9 +1820,21 @@ func use_ability() -> void:
 			used = _ability_detonate()
 		CharacterId.MINER:
 			used = _place_ordnance(true)
+		CharacterId.GRENADIER:
+			used = _throw_grenade()
 	if used:
 		ability_on_cooldown = true
-		get_tree().create_timer(ability_cooldown).timeout.connect(func(): ability_on_cooldown = false)
+		# Held rather than fired and forgotten: the dial reads time_left off it
+		# to draw the cooldown winding down (see _draw_cooldown_dial), so there
+		# is one clock rather than a second one kept in step with this.
+		_ability_timer = get_tree().create_timer(ability_cooldown)
+		# The redraw matters as much as the flag: _process stops asking for one
+		# the moment the cooldown is over, and a CanvasItem keeps whatever it
+		# last drew until something asks again — which left the spent dial
+		# painted under the Grenadier's feet for the rest of the round.
+		_ability_timer.timeout.connect(func():
+			ability_on_cooldown = false
+			queue_redraw())
 
 ## Drops a temp wall on the Engineer's own cell — passable for them (see
 ## Arena.is_walkable_for), solid for everyone else, bombs, and explosions.
@@ -1321,9 +1899,17 @@ func pickup_weapon() -> void:
 func apply_powerup(type: int) -> void:
 	match type:
 		Consts.PowerupType.BOMB_COUNT:
-			bomb_count_max += 1
-			bomb_count_current += 1
 			bomb_level += 1
+			# The Grenadier has nothing to carry more of. Their charges are
+			# shells in the air and the cooldown means there is never more than
+			# one, so a second would sit unused for the whole round; the pickup
+			# buys the launcher another cell of reach instead. That is why
+			# _grenade_max_range() reads bomb_level rather than bomb_count_max,
+			# and why the HUD's bomb pip counts reach for them — it is the same
+			# number of pickups either way, spent on the only thing that helps.
+			if _can_place_bombs():
+				bomb_count_max += 1
+				bomb_count_current += 1
 		Consts.PowerupType.RADIUS:
 			bomb_radius += 1
 			radius_level += 1
@@ -1331,6 +1917,7 @@ func apply_powerup(type: int) -> void:
 			move_duration *= 0.9
 			_update_move_speed()
 			speed_level += 1
+			kick_distance += 1 # dead weight on everyone else; see KICK_BASE_DISTANCE
 		Consts.PowerupType.SHIELD:
 			shield_charges += 1
 	stats_changed.emit()
@@ -1352,6 +1939,7 @@ func die() -> void:
 	_kill()
 
 func _kill() -> void:
+	_cancel_charge()
 	alive = false
 	visible = false
 	Sfx.play("player_death")

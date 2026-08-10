@@ -22,8 +22,8 @@ const BAR_SELECTED_COLOR := Color(1.0, 0.65, 0.2, 1)
 
 const COUNTDOWN_SECONDS := 3
 
-enum SettingsRow { ROOM, MAP_SIZE, PLAYER_SLOTS, BOTS, RANDOM_WALLS, POWERUP_CHANCE, SUDDEN_DEATH, ROUNDS }
-const SETTINGS_ROW_COUNT := 8
+enum SettingsRow { ROOM, MAP_SIZE, MAP_LAYOUT, PLAYER_SLOTS, BOTS, RANDOM_WALLS, POWERUP_CHANCE, SUDDEN_DEATH, ROUNDS }
+const SETTINGS_ROW_COUNT := 9
 
 var view: String = "settings" # "settings" or "room"
 var settings_selected: int = SettingsRow.ROOM
@@ -45,7 +45,8 @@ var countdown_active: bool = false
 	$SettingsPanel/Rows/MapSizeRow/Bars/Bar4,
 ]
 @onready var settings_row_nodes: Array = [
-	$SettingsPanel/Rows/RoomRow, $SettingsPanel/Rows/MapSizeRow, $SettingsPanel/Rows/PlayerSlotsRow,
+	$SettingsPanel/Rows/RoomRow, $SettingsPanel/Rows/MapSizeRow, $SettingsPanel/Rows/MapLayoutRow,
+	$SettingsPanel/Rows/PlayerSlotsRow,
 	$SettingsPanel/Rows/BotsRow, $SettingsPanel/Rows/RandomWallsRow,
 	$SettingsPanel/Rows/PowerupChanceRow, $SettingsPanel/Rows/SuddenDeathRow, $SettingsPanel/Rows/RoundsRow,
 ]
@@ -85,6 +86,8 @@ func _refresh_settings_texts() -> void:
 	$SettingsPanel/Subtitle.text = Loc.t("MAP_SETTINGS_TITLE")
 	$SettingsPanel/Rows/RoomRow/Label.text = "▶  %s" % Loc.t("ROOM_ITEM")
 	$SettingsPanel/Rows/MapSizeRow/Label.text = Loc.t("SETTINGS_MAP_SIZE")
+	$SettingsPanel/Rows/MapLayoutRow/Label.text = Loc.t("SETTINGS_MAP_LAYOUT")
+	$SettingsPanel/Rows/MapLayoutRow/Value.text = Consts.map_layout_name(Consts.map_layout_index)
 	$SettingsPanel/Rows/PlayerSlotsRow/Label.text = Loc.t("SETTINGS_PLAYER_SLOTS")
 	$SettingsPanel/Rows/PlayerSlotsRow/Value.text = str(Consts.configured_player_slots)
 	$SettingsPanel/Rows/BotsRow/Label.text = Loc.t("SETTINGS_BOTS")
@@ -139,6 +142,8 @@ func _adjust_setting(delta: int) -> void:
 		SettingsRow.MAP_SIZE:
 			Consts.set_map_size(Consts.map_size_index + delta)
 			_refresh_map_size_bars()
+		SettingsRow.MAP_LAYOUT:
+			Consts.set_map_layout_index(Consts.map_layout_index + delta)
 		SettingsRow.PLAYER_SLOTS:
 			Consts.set_configured_player_slots(Consts.configured_player_slots + delta)
 			settings_touched = true

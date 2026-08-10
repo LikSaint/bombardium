@@ -18,6 +18,93 @@ const DEFAULT_MAP_SIZE_INDEX := 2
 func map_size_name(index: int) -> String:
 	return Loc.t(MAP_SIZES[index]["name_key"])
 
+# --- Map layouts -----------------------------------------------------------
+#
+# A layout is the arena's *terrain* — the chasms and fixed structures carved
+# into it — and it composes with the base wall pattern rather than replacing
+# it: Classic on top of the checkerboard is exactly the map this game has
+# always had, and every layout still honours the Random walls setting.
+#
+# Layouts are gated on grid size rather than being offered everywhere and
+# quietly degrading. A chasm splitting a 9x7 arena leaves two rooms of a dozen
+# cells each, which is not a smaller version of the same map — it's a different
+# and much worse one. Anything that doesn't fit falls back to Classic (see
+# resolve_map_layout).
+const LAYOUT_CLASSIC := "classic"
+const LAYOUT_BRIDGES := "bridges"
+const LAYOUT_CRATER := "crater"
+const LAYOUT_QUARTERS := "quarters"
+const LAYOUT_PLAZA := "plaza"
+
+## Index 0 is the "roll a fresh one every round" entry rather than a map, and
+## is the default: a match should walk through the set instead of settling on
+## whichever one happened to be selected in the lobby.
+const MAP_LAYOUTS := [
+	{"id": "", "name_key": "MAP_LAYOUT_RANDOM", "min_width": 0, "min_height": 0},
+	{"id": LAYOUT_CLASSIC, "name_key": "MAP_LAYOUT_CLASSIC", "min_width": 0, "min_height": 0},
+	{"id": LAYOUT_BRIDGES, "name_key": "MAP_LAYOUT_BRIDGES", "min_width": 11, "min_height": 9},
+	{"id": LAYOUT_CRATER, "name_key": "MAP_LAYOUT_CRATER", "min_width": 13, "min_height": 11},
+	{"id": LAYOUT_QUARTERS, "name_key": "MAP_LAYOUT_QUARTERS", "min_width": 11, "min_height": 9},
+	{"id": LAYOUT_PLAZA, "name_key": "MAP_LAYOUT_PLAZA", "min_width": 13, "min_height": 9},
+]
+const MAP_LAYOUT_RANDOM_INDEX := 0
+const DEFAULT_MAP_LAYOUT_INDEX := MAP_LAYOUT_RANDOM_INDEX
+var map_layout_index: int = DEFAULT_MAP_LAYOUT_INDEX
+
+func set_map_layout_index(index: int) -> void:
+	map_layout_index = clampi(index, 0, MAP_LAYOUTS.size() - 1)
+
+func map_layout_name(index: int) -> String:
+	return Loc.t(MAP_LAYOUTS[index]["name_key"])
+
+func layout_name_for_id(id: String) -> String:
+	for entry in MAP_LAYOUTS:
+		if entry["id"] == id:
+			return Loc.t(entry["name_key"])
+	return Loc.t(MAP_LAYOUTS[1]["name_key"])
+
+func _layout_fits(entry: Dictionary) -> bool:
+	return GRID_WIDTH >= entry["min_width"] and GRID_HEIGHT >= entry["min_height"]
+
+## Layouts still due to be played this pass, drawn from the end. See
+## _refill_layout_bag.
+var _layout_bag: Array[String] = []
+## Whatever generate() last resolved, so the bag can avoid opening on it.
+var _last_layout_id: String = ""
+
+## The layout the round about to start actually gets. Called once per round (by
+## Arena.generate), which is what makes the Random entry re-roll per round
+## rather than per match.
+func resolve_map_layout() -> String:
+	if map_layout_index != MAP_LAYOUT_RANDOM_INDEX:
+		var chosen: Dictionary = MAP_LAYOUTS[map_layout_index]
+		_last_layout_id = chosen["id"] if _layout_fits(chosen) else LAYOUT_CLASSIC
+		return _last_layout_id
+	if _layout_bag.is_empty():
+		_refill_layout_bag()
+	_last_layout_id = _layout_bag.pop_back()
+	return _last_layout_id
+
+## Random deals the whole set out before repeating any of it, rather than
+## rolling independently every round: an honest roll gives the same layout twice
+## in a row about one round in five, and a five-round match that plays Crater
+## three times reads as the setting not working. Refilled once the bag runs dry.
+##
+## A fresh bag never opens on the layout that just played, so the seam between
+## two bags can't repeat one either. That's done by swapping the offending first
+## draw with another entry rather than by reshuffling until it lands well — a
+## reshuffle loop isn't guaranteed to end.
+func _refill_layout_bag() -> void:
+	_layout_bag.clear()
+	for i in range(1, MAP_LAYOUTS.size()):
+		if _layout_fits(MAP_LAYOUTS[i]):
+			_layout_bag.append(MAP_LAYOUTS[i]["id"])
+	_layout_bag.shuffle()
+	if _layout_bag.size() > 1 and _layout_bag[-1] == _last_layout_id:
+		var other := randi() % (_layout_bag.size() - 1)
+		_layout_bag[-1] = _layout_bag[other]
+		_layout_bag[other] = _last_layout_id
+
 var map_size_index: int = DEFAULT_MAP_SIZE_INDEX
 var GRID_WIDTH: int = MAP_SIZES[DEFAULT_MAP_SIZE_INDEX]["width"]
 var GRID_HEIGHT: int = MAP_SIZES[DEFAULT_MAP_SIZE_INDEX]["height"]
@@ -26,6 +113,9 @@ func set_map_size(index: int) -> void:
 	map_size_index = clampi(index, 0, MAP_SIZES.size() - 1)
 	GRID_WIDTH = MAP_SIZES[map_size_index]["width"]
 	GRID_HEIGHT = MAP_SIZES[map_size_index]["height"]
+	# Which layouts fit is a function of the grid, so a half-dealt bag from the
+	# old size can hold layouts this one can't take (and miss ones it can).
+	_layout_bag.clear()
 
 ## The arena's footprint in world pixels. The single place that turns the grid
 ## into a size — everything that has to frame the arena on screen (Main's
@@ -75,9 +165,9 @@ func rounds_per_match() -> int:
 func set_rounds_index(index: int) -> void:
 	rounds_index = clampi(index, 0, ROUNDS_OPTIONS.size() - 1)
 
-const SUDDEN_DEATH_OPTIONS := [60, 180, 300, 480, 720, 1200, 0] # last 0 means "off"
-const SUDDEN_DEATH_LABELS := ["1", "3", "5", "8", "12", "20", "OFF"]
-const DEFAULT_SUDDEN_DEATH_INDEX := 2 # 300 seconds (5 minutes)
+const SUDDEN_DEATH_OPTIONS := [60, 120, 180, 300, 480, 720, 1200, 0] # last 0 means "off"
+const SUDDEN_DEATH_LABELS := ["1", "2", "3", "5", "8", "12", "20", "OFF"]
+const DEFAULT_SUDDEN_DEATH_INDEX := 1 # 120 seconds (2 minutes)
 var sudden_death_index: int = DEFAULT_SUDDEN_DEATH_INDEX
 
 func sudden_death_timer() -> float:
@@ -95,6 +185,13 @@ const DIR_LEFT := Vector2i(-1, 0)
 const DIR_RIGHT := Vector2i(1, 0)
 const DIRECTIONS: Array[Vector2i] = [DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT]
 
+## Nothing in the game *moves* diagonally — these exist for the Pyro's blast,
+## which throws four short arms out of the corners on top of the usual four
+## (see Arena._star_blast_cells).
+const DIAGONALS: Array[Vector2i] = [
+	Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(1, 1),
+]
+
 const PLAYER_COLORS := [
 	Color(0.2, 0.6, 1.0),
 	Color(1.0, 0.3, 0.3),
@@ -106,7 +203,7 @@ const PLAYER_COLORS := [
 # 4-directional PixelLab sprite (single flat image per direction, not a
 # tintable-layer setup) — team color is applied as a soft whole-sprite
 # modulate blend in CharacterPortrait.gd rather than a clothes-only tint.
-const CHARACTER_COUNT := 7
+const CHARACTER_COUNT := 8
 
 const CHARACTER_NAME_KEYS := [
 	"CHAR_NAME_BOMB_MASTER",
@@ -116,6 +213,7 @@ const CHARACTER_NAME_KEYS := [
 	"CHAR_NAME_BOMB_KICKER",
 	"CHAR_NAME_MAGNET",
 	"CHAR_NAME_MINER",
+	"CHAR_NAME_GRENADIER",
 ]
 
 func character_name(character_id: int) -> String:
@@ -131,6 +229,7 @@ const CHARACTER_ABILITY_DESC_KEYS := [
 	"CHAR_DESC_BOMB_KICKER",
 	"CHAR_DESC_MAGNET",
 	"CHAR_DESC_MINER",
+	"CHAR_DESC_GRENADIER",
 ]
 
 ## A blurb for a character with a button-press ability carries a single `%s`;
@@ -195,6 +294,18 @@ const CHARACTER_SPRITES := [
 		"east": preload("res://assets/characters/miner_east.png"),
 		"west": preload("res://assets/characters/miner_west.png"),
 	},
+	# Re-skin, and the one that carries its own kit: the Miner's frames in olive
+	# drab with a plain gunmetal helmet, plus a shouldered launcher drawn on
+	# every frame. The weapon is deliberately oversized — it is the only thing
+	# separating two soldiers built on the same body at lobby size, and it is
+	# also the whole character. Built by a Pillow script rather than PixelLab,
+	# for the same reason as the entries above.
+	{
+		"south": preload("res://assets/characters/grenadier_south.png"),
+		"north": preload("res://assets/characters/grenadier_north.png"),
+		"east": preload("res://assets/characters/grenadier_east.png"),
+		"west": preload("res://assets/characters/grenadier_west.png"),
+	},
 ]
 
 # Same character/direction keys as CHARACTER_SPRITES, but each entry is an
@@ -245,6 +356,13 @@ const CHARACTER_WALK_FRAMES := [
 		"east": [preload("res://assets/characters/walk/miner_east_0.png"), preload("res://assets/characters/walk/miner_east_1.png"), preload("res://assets/characters/walk/miner_east_2.png"), preload("res://assets/characters/walk/miner_east_3.png"), preload("res://assets/characters/walk/miner_east_4.png"), preload("res://assets/characters/walk/miner_east_5.png")],
 		"west": [preload("res://assets/characters/walk/miner_west_0.png"), preload("res://assets/characters/walk/miner_west_1.png"), preload("res://assets/characters/walk/miner_west_2.png"), preload("res://assets/characters/walk/miner_west_3.png"), preload("res://assets/characters/walk/miner_west_4.png"), preload("res://assets/characters/walk/miner_west_5.png")],
 	},
+	# Re-skin — see the note on the Grenadier's entry in CHARACTER_SPRITES.
+	{
+		"south": [preload("res://assets/characters/walk/grenadier_south_0.png"), preload("res://assets/characters/walk/grenadier_south_1.png"), preload("res://assets/characters/walk/grenadier_south_2.png"), preload("res://assets/characters/walk/grenadier_south_3.png"), preload("res://assets/characters/walk/grenadier_south_4.png"), preload("res://assets/characters/walk/grenadier_south_5.png")],
+		"north": [preload("res://assets/characters/walk/grenadier_north_0.png"), preload("res://assets/characters/walk/grenadier_north_1.png"), preload("res://assets/characters/walk/grenadier_north_2.png"), preload("res://assets/characters/walk/grenadier_north_3.png"), preload("res://assets/characters/walk/grenadier_north_4.png"), preload("res://assets/characters/walk/grenadier_north_5.png")],
+		"east": [preload("res://assets/characters/walk/grenadier_east_0.png"), preload("res://assets/characters/walk/grenadier_east_1.png"), preload("res://assets/characters/walk/grenadier_east_2.png"), preload("res://assets/characters/walk/grenadier_east_3.png"), preload("res://assets/characters/walk/grenadier_east_4.png"), preload("res://assets/characters/walk/grenadier_east_5.png")],
+		"west": [preload("res://assets/characters/walk/grenadier_west_0.png"), preload("res://assets/characters/walk/grenadier_west_1.png"), preload("res://assets/characters/walk/grenadier_west_2.png"), preload("res://assets/characters/walk/grenadier_west_3.png"), preload("res://assets/characters/walk/grenadier_west_4.png"), preload("res://assets/characters/walk/grenadier_west_5.png")],
+	},
 ]
 
 # Starting stats for a character (before any upgrades), for the lobby's stat
@@ -271,6 +389,11 @@ func get_character_stats(character_id: int) -> Dictionary:
 			stats["shield"] = 1
 		6:  # Miner
 			stats["bombs"] = 2
+			stats["shield"] = 1
+		7:  # Grenadier
+			# One charge and no way to spend it on the floor — the launcher is
+			# this character's bombs (Player._can_place_bombs), and bomb pickups
+			# buy it reach rather than a second shell.
 			stats["shield"] = 1
 	return stats
 

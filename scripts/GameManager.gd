@@ -85,7 +85,7 @@ func start_round(player_ids: Array[int]) -> void:
 		if not scores.has(id):
 			scores[id] = 0
 
-# Two players can die in the same blast (e.g. a Pyro's circle explosion
+# Two players can die in the same blast (e.g. a Pyro's star explosion
 # catching both survivors at once) — both deaths land in the same frame via
 # separate Explosion body_entered signals. Deferring the win check to idle
 # time lets all of that frame's deaths land first, so a full wipeout reads as

@@ -21,6 +21,8 @@ and other state as plain text, since icons alone weren't discoverable enough:
 - **Cycle character**: A/D (keyboard) or D-pad / left stick left-right (gamepad), only while not ready. Each
   joined slot shows a one-line blurb of that character's passive/ability underneath the portrait.
 - **Map size**: keyboard only, Up/Down — 5 bar-height presets, Крошечная (9x7) to Огромная (21x17).
+- **Map**: which terrain the arena is carved into — Classic, Bridges, Crater, Quarters, Plaza, or
+  Random (the default, re-rolled every round). See [Maps](#maps).
 - **Add/remove bot**: keyboard only, B fills the next open slot with an AI-controlled bot (a random
   character, instantly ready — shown with an "ИИ" badge instead of the ready checkmark); N removes
   the most recently added bot. Bots play with the same character/rules as anyone else, just slower
@@ -94,26 +96,51 @@ In-match:
   instead of soft-locking the game paused forever (since, by design, no other device is allowed to
   touch someone else's pause menu).
 - Placed bombs pulse faster and glow redder the closer they are to going off.
+- The results overlay between rounds leads with the winner *as a character*: their own sprite, blown
+  up big in their team color and walking on the spot, with the character's name under it — "Player 2"
+  alone stopped meaning much once everyone started re-picking between rounds. The whole block shrinks
+  as one piece on a window too short to hold it. A draw shows the text only.
+- **The match actually stops when it's over.** `Main._on_round_ended` used to call
+  `GameManager.reset_match()` + `reload_current_scene()` unconditionally at the end of every round,
+  match-over included — which zeroed `round_number` back to 0 and dropped straight into a fresh round
+  1 with the same players, so a "5-round match" never actually ended, it just kept dealing itself
+  another one forever. The last round's results now stay up and, if anyone human is in the match,
+  hand off to a small **Restart / Lobby / Quit** menu (`Main._show_match_over_menu`) instead of
+  auto-continuing — any connected device may drive it, the same "nobody owns this screen" rule
+  `MainMenu.gd`'s title screen uses. Restart calls the same `reset_match()` + reload as before, now
+  gated behind an actual choice; Lobby is `GameManager.leave_to_lobby()` (the same transition the
+  pause menu's own exit option uses); Quit exits outright. A match with nobody there to press a
+  button — every slot a bot, or every pad gone — has no menu to get stuck on: it falls back to the
+  old timed countdown, just landing on the Lobby now instead of quietly restarting.
+- The **pause menu** shows the running score in the corner for as long as it's open
+  (`PauseMenu._refresh_score`) — pausing mid-match is exactly when someone wants to check it, and the
+  alternative (catching it during the few-second between-round overlay) is gone before most people
+  think to look.
 
 ## Status (MVP priority list)
 
 - [x] 1. Grid movement + base bomb + destructible blocks
 - [x] 2. Local multiplayer — Lobby join flow (up to 4, keyboard + gamepads), mid-match disconnect/reconnect handling
-- [x] 3. Rounds/score UI — 5s results overlay between rounds, 5-round match, match winner by score
-- [x] 4. Character roster + abilities — Bomb-Master, Parkour Runner, Engineer, Pyro, Bomb-Kicker (5 characters; brief listed 4, added a 5th per later request)
+- [x] 3. Rounds/score UI — results overlay between rounds, configurable match length, match winner by
+  score with a Restart/Lobby/Quit menu on the final screen
+- [x] 4. Character roster + abilities — Bomb-Master, Parkour Runner, Engineer, Pyro, Bomb-Kicker, Magnetto, Miner, Grenadier (8 characters; brief listed 4, the rest added per later requests)
 - [~] 5. Powerups — bomb count/radius/speed/shield drop from blocks and sit on the ground until collected (bobbing icon, never destroyed by blasts); extra weapon *pickups* (mine/remote/fire bomb) not yet built
 - [~] 6. Art & audio — AI-generated (PixelLab) pixel-art characters with walk animations, HUD/pickup icons, pause menu icons, blocks, walls, explosions, temp wall all done. Procedural sound effects and two music loops are in; no voice/announcer.
-- [x] 7. Sudden death — a round that drags past 5 minutes gets walled in from the outside
+- [x] 7. Sudden death — a round that drags past the round-end timer (default 2 minutes) gets walled in from the outside
+- [x] 8. Map layouts — Classic, Bridges, Crater, Quarters, Plaza; by default every round is on a different one
 
 ## Characters
 
 | Character | Passive | Ability (ability button) |
 |---|---|---|
-| Bomb-Master (Сапёр) | +1 blast radius, +1 bomb, +1 shield, from the start | **No fuse at all** — every bomb you place is a remote mine (blinking antenna, no ticking Timer) that only goes off when you press this |
+| Bomb-Master (Сапёр) | +1 bomb, +1 shield, from the start | **No fuse at all** — every bomb you place is a remote mine (blinking antenna, no ticking Timer) that only goes off when you press this |
 | Parkour Runner (Паркурщик) | +25% move speed, +1 shield | Double-tap a direction to hop over a crate, a bomb, **or an indestructible wall** (no button) |
 | Engineer | +1 bomb | Place a temp wall (12s) on your own cell — passable for you only, destroyed early by a blast. **One wall per bomb you have** |
 | Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs | Every bomb explodes in a diamond and punches through crates |
-| Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, and skating: unbroken straight-line running charges speed up to 1.6x over 0.8s | Kick the bomb in front of you; it slides until it hits an obstacle, and can still explode mid-slide |
+| Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, and skating: unbroken straight-line running charges speed up to 1.6x over 0.8s | Kick the bomb in front of you **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide |
+| Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two |
+| Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its (half-radius) blast reaches |
+| Grenadier (Гранатомётчик) | +1 shield, and **no bombs at all** — the launcher replaces them | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells with the blast shrunk to fit, **hold** it to paint in a dial at your feet and walk the shot out to 3 cells (+1 per bomb powerup), the blast growing with the distance — but holding plants you |
 
 The Sapper's mines stay live until triggered — by the ability button, or by chain-detonating in
 someone else's blast — with no timeout of their own, so `bomb_count_current` doesn't refill until
@@ -144,12 +171,88 @@ The Engineer was the worst off — no passive at all, and a single minute-long w
 biggest share of that: a starting bomb, a wall budget tied to their bomb count, and a wall lifetime
 short enough that more walls doesn't mean a permanently redrawn map.
 
+The Grenadier is the only ranged attack in the game, and the only character with **no ordinary
+bombs**: the launcher replaces them outright (`Player._can_place_bombs`), so it lives on the *bomb*
+button and the ability button does nothing for them. (It threw as well for a while. Two buttons
+doing one thing invites holding one and tapping the other, which cancels your own charge.)
+Everything about the shot is built to keep it from being artillery.
+
+How far it goes is the one thing the player controls, and it is set by how long the button is held
+rather than by aiming:
+
+- A **tap** throws two cells and shrinks *that shell's* blast to whatever fits in the gap
+  (`Player._grenade_shot_radius`): two cells away can only ever be a radius-1 blast, three cells buys
+  radius 2, and so on up to the launcher's own. So a tap is safe to take at any radius — a Grenadier
+  with a big blast still lobs one right in front of themselves instead of being pushed further out by
+  their own upgrades — and charging buys power as well as reach, since the only way to throw your
+  whole blast is to throw it properly far.
+- **Holding** paints in a dial at the Grenadier's feet over `Player.GRENADE_CHARGE_TIME` (0.6s) and
+  walks the landing cell out to `GRENADE_CHARGED_RANGE` (3), the fixed range the character shipped
+  with. Holding also **plants them**: they can still turn (the launcher is aimed by facing) but not
+  walk, so a charged shot is taken from where it was started rather than carried into position with
+  the shot already loaded.
+- Every **bomb** powerup adds a cell to that ceiling, because a character with nothing to put on the
+  floor has no other use for one — their charges are shells in the air, and the cooldown means there
+  is never more than one. Reach is therefore what a Grenadier grows, and the only upgrade in the game
+  that grows an ability rather than the body carrying it; the HUD's bomb pip counts reach for them.
+  Speed stays out of it and buys them only what it buys everyone — a character who has to stand still
+  to charge shouldn't be turning legs into artillery range as well.
+
+The dial has two states and they can never both be on screen, because a charge is refused while the
+launcher is hot. Charging, it is orange and paints in **clockwise** from twelve o'clock, one slice
+per cell of extra range with a spoke between slices — what it reports is which cell the shell lands
+on, so a smooth sweep would imply a precision the grid hasn't got, and a full circle of colour is
+this Grenadier's longest throw. On cooldown it is red and unwinds **anticlockwise**: the charge
+running backwards, drained to nothing at the moment the launcher is ready again.
+
+The shell is then in the air for `Bomb.flight_time_for()` — 0.22s per cell, floored at 1.1s — with a
+ring drawn on its landing cell for the whole flight. Even the shortest shot is three and a half
+cells of walking at base speed, which is the entire counterplay: a shell aimed where somebody *is*
+misses, one aimed where they are going does not. The floor is deliberately generous, because a shell
+lobbed over the crate somebody is hiding behind arrives with the least warning of any of them.
+Pricing the rest by distance is what stops the charged shot from being strictly better than the tap:
+it reaches further, but it hangs in the air longer and is that much easier to walk out from under.
+
+On top of the per-shot cap, the launcher only ever has **half** the radius its thrower has picked up
+(`Player._grenade_radius()`), so a radius powerup is worth exactly half as much to it as to a bomb on
+the floor — a full-strength blast on a shell you can drop three cells away with no risk to yourself
+would otherwise be the best thing in the game. Between the two rules a shell can never cover the cell
+it was thrown from, and the shot is refused outright in any case where the arena says it would.
+
+A shell still costs a bomb charge and hands it back when it goes off, which keeps it inside the same
+accounting as everyone else's ordnance, but with nothing else drawing on the pool that single base
+charge is never what stands in the way. The **cooldown** is, and it is counted **from impact rather
+than from the throw**: `Player.GRENADE_COOLDOWN` (1.2s) is added to that shot's flight time, so the
+tube is busy for as long as something is in the air and 1.2s after it lands. A tapped shot therefore
+comes round every 2.3s and a long one every 2.5-3s, about the pace of everyone else's bombs; at half
+of that it read as spamming shells rather than picking shots. Measured from the throw instead, any
+cooldown shorter than the flight would put two shells in the air at once, which is a different and
+much less answerable character.
+
+**Nothing stops a shell**, at either end. Crates, water, bombs, people and stone are all flown over,
+and a shell aimed at a wall goes off *on* the wall, its blast spreading out of the impact into
+whatever open ground is beside it. It used to walk the landing cell back to the last non-wall cell,
+which is tidier in the abstract and unreadable in play: on the default checkerboard, aiming along an
+even row meant the shell quietly landed a cell nearer than the dial had just promised, for a reason
+nothing on screen explained. The only thing still walked back is the edge of the map, since out
+there is no cell to land on at all.
+
+A shell in the air is deliberately **not on the grid**: it doesn't block the cell it is about to land
+on, can't be kicked or chained on the way there, and comes down on top of a mine without erasing it.
+Bots see it anyway, off its owner's `live_bombs` (`Player._incoming_shell_cells`), and unlike
+everything else they react to they check for one **every frame** rather than on their decision tick —
+a shell lands in less time than one interval, and a bot that waited its turn would be informed of the
+shot by the explosion. Finding one aimed at the cell they are standing on *or walking toward* throws
+away the heading they were holding and forces a decision on the spot, after which the ordinary flee
+handles it. Bots aimed at directly now walk clear of roughly two shells in three, against one in
+three before.
+
 Bombs chain-detonate: any blast that reaches another bomb sets it off immediately too.
 
 ## Art pipeline
 
 Characters, icons, and props are generated through the **PixelLab MCP server** (`mcp__pixellab__*`
-tools), not hand-drawn. Each of the 5 characters is a single flat-shaded sprite per direction —
+tools), not hand-drawn. Each character is a single flat-shaded sprite per direction —
 `assets/characters/<name>_south.png` / `_north.png` / `_east.png` / `_west.png` (idle) plus
 `assets/characters/walk/<name>_<direction>_<0-5>.png` (6-frame walk cycle per direction, from
 PixelLab's `walk` template animation). `scripts/Constants.gd`'s `CHARACTER_SPRITES` /
@@ -180,9 +283,17 @@ once, cost ~20 generations, and failed on a content-policy check — not worth r
 bomb (with its own baked fuse) is used as-is for the static `assets/icons/bomb.png` HUD stat icon,
 where nothing needs to animate.
 
+Three characters are **re-skins** rather than generations, because the trial account is nearly out
+(`get_balance`) and a character's own sheet costs 5: the Magnet is the Engineer's frames with the
+hard hat restyled, the Miner is the Engineer's with a camo helmet and visor, and the Grenadier is
+the Miner's in olive drab with a shouldered launcher drawn on. Only the last of those has its script
+kept — `tools/grenadier_sprites.py`, run from anywhere, writes all 28 frames from the Miner's and is
+where the launcher's size, angle and colours live. Note that it reads the Miner's sheet at build
+time, so re-skinning the Miner again would change the Grenadier under it.
+
 Regenerating art means re-running the PixelLab MCP calls (`create_character`, `animate_character`
-with `template_animation_id="walk"`, `create_image_pixen`, `edit_image`) — there's no local script,
-and the trial account has a hard cap on generations (`get_balance`), so budget before batching a lot
+with `template_animation_id="walk"`, `create_image_pixen`, `edit_image`) — nothing but the re-skin
+script above runs locally, and the trial account has a hard cap on generations (`get_balance`), so budget before batching a lot
 of characters/animations at once. `animate_character` in template mode queues one job per direction
 (4 here) and the API caps you at 8 concurrent jobs, so animating 2+ characters at once needs to be
 staggered. After adding/changing any PNG, Godot needs to (re)import it before a headless run can
@@ -221,9 +332,66 @@ the same three-row Language / Sound / Music layout) and persisted to `user://set
 the language setting — each writer re-loads the file before saving so it never clobbers the others'
 keys.
 
+## Maps
+
+The **Map** row on the Lobby's settings screen picks the arena's *terrain*. It is separate from
+**Map size** (which only sets the grid) and from **Random walls** (which swaps the checkerboard of
+fixed pillars for scattered ones): a layout is carved on top of whichever base pattern those two
+produce, so every layout works at every size and in either wall mode.
+
+The default is **Случайно / Random**, and it re-rolls **every round**, not once per match — a match
+walks through the set instead of settling on one map. It deals rather than rolls: every layout that
+fits the grid is played once before any of them comes up again, and a fresh deal never opens on the
+one that just played, so no two rounds in a row are on the same map. (An honest per-round roll
+repeated itself about one round in five, and a five-round match that played Crater three times read
+as the setting being broken.) Whichever map came up is named on screen for
+the first 3 seconds of the round, since otherwise the terrain changing under everyone reads as the
+game being inconsistent rather than as the setting doing what it says.
+
+| Map | Terrain |
+|---|---|
+| Классика / Classic | Nothing carved — the map this game has always had. |
+| Мосты / Bridges | A chasm splits the arena down the middle; two bridges are the only way across. |
+| Кратер / Crater | A ring of chasm around a small central plateau, with four bridges in. |
+| Кварталы / Quarters | A solid wall cross cuts the arena into four rooms joined by four doorways. |
+| Площадь / Plaza | The centre is swept clear of everything and the crates pile up around it (85% density). |
+
+Layouts are gated on grid size rather than offered everywhere and quietly degrading — a chasm
+splitting a 9x7 arena leaves two rooms of a dozen cells, which isn't a smaller version of the same
+map but a worse one. Anything that doesn't fit falls back to Classic, including inside a Random roll.
+
+### Chasms and bridges
+
+A chasm (`CellState.CHASM`) is a **hole, not a wall**, and the distinction is load-bearing:
+
+- Nobody crosses it, and neither do bombs — a kicked or magnet-crawled bomb stops at the water's edge.
+- **Blasts fly straight over it.** A river that also stopped explosions would turn Bridges into two
+  arenas that never touch until somebody walks across; the crossings are meant to create a standoff,
+  not enforce one.
+- **The Parkour Runner can hop it.** A chasm is a one-cell obstacle with open ground behind it, so
+  the double-tap hop clears it exactly like a crate or a stone pillar does. On the water layouts that
+  is the character's whole edge: the only one a blown bridge doesn't strand.
+
+A bridge is one chasm cell with a crossing over it. Intact it is ordinary floor and reads as such to
+*everything* — players walk it, bombs slide over it, the bots' pathfinder routes through it — and
+any explosion that reaches it drops it back to the chasm underneath. It then rebuilds itself **25%
+every 5 seconds** and is walkable again only at the last quarter: a bridge is either there or it
+isn't. A fresh blast resets the progress to zero outright, so holding a crossing down is something
+you have to keep spending bombs on. How much is left to close is drawn rather than metered — the
+deck grows in from both banks, and the gap in the middle *is* the repair bar.
+
+When a crossing goes down it takes what was standing on it: a powerup is removed, and a bomb is
+detonated rather than deleted so its owner gets the charge back. Players are the exception —
+`Player._unstick()` already walks anyone off a cell that has stopped being legal, so a collapse is a
+shove to the nearest bank rather than a drowning. Generation guarantees both banks of every bridge
+are open ground (a crossing that opened onto a crate or a random wall would be one in name only),
+and the connectivity guard that protects Random walls treats chasms as closed, so a map is never
+generated already split. It can of course *become* split mid-round, which is the layout working.
+
 ## Sudden death
 
-A round that runs past 5 minutes starts closing in (`scripts/SuddenDeath.gd`, a node on `Main`).
+A round that runs past the **Закрытие раунда / Round end** setting (default 2 minutes) starts closing
+in (`scripts/SuddenDeath.gd`, a node on `Main`).
 Permanent walls drop one at a time, clockwise from the top centre of the arena and spiralling
 inward, until the arena is sealed or someone is the last one standing.
 
@@ -245,6 +413,9 @@ inward, until the arena is sealed or someone is the last one standing.
 `Arena.seal_cell()` clears whatever was on the cell: a block goes without its usual powerup roll
 (the wall would bury it anyway), a powerup is removed, and a bomb is *detonated* rather than
 deleted, so its owner gets the charge back instead of being down a bomb for the rest of the round.
+It also retires any bridge on that cell, so a crossing the ring has just filled in stops rebuilding
+itself. Open water is skipped by the spiral outright — it is impassable already, so sealing it would
+spend a turn of the ring without taking a cell of ground off anyone.
 
 ## Architecture notes
 

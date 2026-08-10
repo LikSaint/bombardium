@@ -1,5 +1,5 @@
 extends Node
-## Sudden death. Once a round has run for START_AFTER_SECONDS, permanent walls
+## Sudden death. Once a round has run past the Round end setting, permanent walls
 ## start dropping in one at a time — clockwise from the top centre of the arena
 ## and spiralling inward — so a stalemate between cautious survivors can't drag
 ## on forever. The playable area just keeps shrinking until someone is left.
@@ -15,7 +15,7 @@ extends Node
 ##
 ## Lives on Main rather than Arena because it's round pacing, not grid state —
 ## Arena only exposes seal_cell() for it. The scene reloads between rounds, so
-## the 5-minute clock resets by itself.
+## the clock resets by itself.
 
 const START_INTERVAL := 3.0
 const END_INTERVAL := 0.28
@@ -146,6 +146,13 @@ func _build_spiral() -> Array[Vector2i]:
 	_dirs = []
 	for i in cells.size():
 		if arena.is_wall(cells[i]) and not arena.is_temp_wall(cells[i]):
+			continue
+		# Open water is impassable already, so filling it in would spend a turn
+		# of the ring without taking a cell of ground off anyone. Bridges are
+		# the exception whatever state they happen to be in when the spiral is
+		# built: a blown one is ground that comes back, and the ring has to be
+		# able to take it away for good (seal_cell retires the crossing).
+		if arena.is_pit(cells[i]) and not arena.is_bridge(cells[i]):
 			continue
 		out_cells.append(cells[i])
 		_dirs.append(dirs[i])

@@ -39,7 +39,28 @@ func _ready() -> void:
 	_refresh_settings_texts()
 	Loc.language_changed.connect(_refresh_hint)
 	Loc.language_changed.connect(_refresh_settings_texts)
+	Loc.language_changed.connect(_refresh_score)
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
+
+## Standings so far, in the corner for the whole time the menu is up — pausing
+## mid-match is exactly when someone wants to check the score without it
+## costing them the round, and the alternative (reading it off the 3-second
+## between-round overlay) is gone before most people think to look. Rebuilt
+## once per open rather than kept live: the match is paused the entire time
+## this menu can be looking at it, so the scores underneath can't change while
+## it's open.
+func _refresh_score() -> void:
+	var score_board: Label = $ScoreBoard
+	if GameManager.scores.is_empty():
+		score_board.visible = false
+		return
+	score_board.visible = true
+	var lines: PackedStringArray = [Loc.t("SCORE_HEADER")]
+	var ids: Array = GameManager.scores.keys()
+	ids.sort()
+	for id in ids:
+		lines.append(Loc.t("SCORE_LINE", [id, GameManager.scores[id]]))
+	score_board.text = "\n".join(lines)
 
 func _refresh_hint() -> void:
 	if not in_settings:
@@ -217,6 +238,7 @@ func _open(device) -> void:
 	selected = 0
 	_refresh_selection()
 	_refresh_title(device)
+	_refresh_score()
 
 func _close() -> void:
 	is_open = false

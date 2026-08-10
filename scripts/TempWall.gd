@@ -1,6 +1,6 @@
 extends Node2D
 ## Engineer ability: blocks movement for 12s, then reverts. A blast that
-## reaches it destroys it early (see Bomb._explode_cross/_explode_circle).
+## reaches it destroys it early (see Bomb._apply_blast).
 ##
 ## The old lifetime was a full minute, which was fine only while the Engineer
 ## could have exactly one wall out: now that the cap scales with their bomb
