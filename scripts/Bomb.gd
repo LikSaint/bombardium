@@ -185,6 +185,11 @@ func _ready() -> void:
 	$Antenna.visible = remote
 	$AntennaTip.visible = remote
 	if thrown:
+		# Lets Player._incoming_shell_cells find every shell in flight by
+		# scanning one group instead of walking each player's live_bombs — the
+		# only way a turret's shell (owner_player == null, in nobody's
+		# live_bombs) gets seen by a bot at all. See that method for the rest.
+		add_to_group("thrown_shells")
 		# No fuse of any kind — impact is the trigger. It sits a little smaller
 		# than a placed bomb because it is meant to read as a shell overhead
 		# rather than as something already on the floor.
@@ -363,7 +368,8 @@ func explode() -> void:
 ## alone — cross and star can't drift apart in what they do to what they
 ## touch, and neither can drift from what _blast_cells tells a mine it covers.
 func _apply_blast() -> void:
-	for c in _blast_cells():
+	var cells := _blast_cells()
+	for c in cells:
 		_spawn_explosion(c)
 		if arena.is_temp_wall(c):
 			arena.destroy_temp_wall_at(c)
@@ -371,6 +377,14 @@ func _apply_blast() -> void:
 			arena.destroy_block_at(c, owner_player)
 		else:
 			_trigger_chain_at(c)
+	# By group, not by cell index: there are only ever a couple of these on the
+	# arena at once, and a separate Arena-side index would just be one more
+	# thing to keep in sync with their tweens. Shared group, not one per hazard
+	# kind, so every future contact hazard (see docs/plan-crate-hazards.md) gets
+	# blast damage for free instead of this method growing a new loop each time.
+	for mob in get_tree().get_nodes_in_group("hazard_mobs"):
+		if cells.has(mob.cell):
+			mob.take_hit()
 
 func _trigger_chain_at(target_cell: Vector2i) -> void:
 	var other = arena.get_bomb_at(target_cell)

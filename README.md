@@ -124,7 +124,7 @@ In-match:
 - [x] 3. Rounds/score UI — results overlay between rounds, configurable match length, match winner by
   score with a Restart/Lobby/Quit menu on the final screen
 - [x] 4. Character roster + abilities — Bomb-Master, Parkour Runner, Engineer, Pyro, Bomb-Kicker, Magnetto, Miner, Grenadier (8 characters; brief listed 4, the rest added per later requests)
-- [~] 5. Powerups — bomb count/radius/speed/shield drop from blocks and sit on the ground until collected (bobbing icon, never destroyed by blasts); extra weapon *pickups* (mine/remote/fire bomb) not yet built
+- [~] 5. Powerups — bomb count/radius/speed/shield drop from blocks and sit on the ground until collected (bobbing icon, never destroyed by blasts); extra weapon *pickups* (mine/remote/fire bomb) not yet built. Some crates drop something dangerous instead — see [Hazards from crates](#hazards-from-crates).
 - [~] 6. Art & audio — AI-generated (PixelLab) pixel-art characters with walk animations, HUD/pickup icons, pause menu icons, blocks, walls, explosions, temp wall all done. Procedural sound effects and two music loops are in; no voice/announcer.
 - [x] 7. Sudden death — a round that drags past the round-end timer (default 2 minutes) gets walled in from the outside
 - [x] 8. Map layouts — Classic, Bridges, Crater, Quarters, Plaza; by default every round is on a different one
@@ -417,6 +417,51 @@ It also retires any bridge on that cell, so a crossing the ring has just filled 
 itself. Open water is skipped by the spiral outright — it is impassable already, so sealing it would
 spend a turn of the ring without taking a cell of ground off anyone.
 
+## Hazards from crates
+
+A broken crate can drop something dangerous instead of a powerup. **Hazard chance** (Lobby settings,
+next to Powerup chance, 0–50%, default 5%) sets the ceiling; how likely a hazard actually is right
+now is lower than that for most of a round, on purpose (`Arena._current_hazard_chance`):
+
+- The first few crates broken each round (`HAZARD_SAFE_BLOCK_COUNT`, currently 4) are a guaranteed
+  miss, counted across the whole room rather than per player — nobody should eat a hazard before
+  they've had a chance to get their bearings.
+- Past that, the chance ramps up with how close the round is to Sudden Death, not on a clock of its
+  own — the same pressure that's about to start closing the arena in is what makes its crates start
+  turning dangerous, so the two land together. With Sudden Death off, the ramp uses a flat fallback
+  duration instead.
+
+Only a crate broken by a player can roll a hazard — one from an ownerless blast (a stray shell, a
+hazard's own explosion) never does, or a hazard could spawn a second one, which could spawn a third,
+turning a single unlucky blast into a chain reaction nobody started.
+
+Four kinds are live today, weighted against each other (`Consts.HAZARD_WEIGHTS`):
+
+- **Cursed powerup** — not a separate object, a trojan variant of an ordinary one: same icon, same
+  bob, with only a faint red glow (`Powerup.is_cursed`, reusing the existing `$Glow` node) as the
+  tell. Picking one up lands a 3-second debuff instead of a buff (`Player.apply_curse`). Bomb count,
+  radius and shield are capped at whatever *this character* started the round with — a curse hides
+  stat pickups stacked on top of that floor, it never cuts into what the character's own kit already
+  grants, and it's a no-op if you haven't picked up that stat yet at all. Speed is the one exception:
+  a flat 25% cut to whatever your current speed is, since the point there is to sting a fast,
+  upgraded runner exactly as much as someone who never picked up a speed powerup.
+- **Saw** — rolls in a straight line, bounces off walls and crates at right angles, and sinks for
+  good if it rolls into water. Kills on contact, dies to a single blast (`scripts/Saw.gd`).
+- **Gas cloud** — doesn't move or block movement, just makes a patch of open ground (its own short
+  flood-fill from the spawn cell, not `Arena.blast_cells`) unsafe to linger in for `LIFETIME` (6s),
+  growing outward ring by ring rather than appearing all at once (`scripts/GasCloud.gd`).
+- **Turret** — stationary, fires a shell at the nearest player on an interval by reusing the
+  Grenadier's own thrown-shell flight and landing telegraph. Two armor — dies to a second blast, not
+  the first, since it can't run from the first one (`scripts/Turret.gd`).
+
+Saw and Turret both join the `"hazard_mobs"` group — the shared contract any contact hazard has to
+meet (`cell`, `next_cell`, `take_hit()`) so blast damage (`Bomb._apply_blast`), Sudden Death/bridge
+cleanup (`Arena.seal_cell`, `Arena.break_bridge_at`) and the bots' hazard map
+(`Player._compute_active_hazard_cells`) all handle every member the same way instead of each hazard
+kind needing its own copy of that plumbing. A fifth kind, a pushable **nuclear barrel** that only
+explodes when caught in someone else's blast, is designed but not built — see
+`docs/plan-crate-hazards.md`.
+
 ## Architecture notes
 
 - Grid size is a runtime setting now (`Consts.set_map_size`), chosen in the Lobby — not a fixed
@@ -438,6 +483,11 @@ spend a turn of the ring without taking a cell of ground off anyone.
   the next time `Main._spawn_players()` reads it. `GameManager.leave_to_lobby()` (from the pause
   menu) clears it back to empty.
 - `Consts` and `GameManager` are autoloaded singletons (see `[autoload]` in `project.godot`).
+- Every thrown `Bomb` (`Bomb.thrown == true`) joins the `"thrown_shells"` group in its own `_ready()`,
+  which is how `Player._incoming_shell_cells()` finds shells in the air for the bots' danger map. It
+  used to walk each player's `live_bombs` instead — fine for the Grenadier's own shots, but a
+  Turret's shell has `owner_player == null` and would never appear in anyone's `live_bombs`, so a bot
+  would be the only thing on the arena that couldn't see it coming.
 - Bots are a `player_slots` entry with `device = Consts.DEVICE_BOT`, added from the Lobby (B key) —
   no separate bot scene/node type. In `Player.gd`, `is_bot` (set from `device_id` in `_ready`)
   swaps `_poll_move_dir()`/`_input()` for `_bot_think()`, run on a `BOT_DECISION_INTERVAL` timer
@@ -476,3 +526,7 @@ spend a turn of the ring without taking a cell of ground off anyone.
 - Mine / remote bomb / fire bomb weapon pickups from the brief aren't built.
 - Team color tinting is whole-sprite (see Art pipeline) — not as clean as a clothes-only tint would
   be, but PixelLab doesn't hand back separable layers.
+- The nuclear barrel hazard (pushable by anyone, explodes only when caught in someone else's blast)
+  is designed but not built — see [Hazards from crates](#hazards-from-crates) and
+  `docs/plan-crate-hazards.md`. Bots also don't yet treat any hazard as a target worth bombing
+  (they only flee it) or use a Saw/Turret's blast radius offensively.

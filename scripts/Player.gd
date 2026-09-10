@@ -190,12 +190,48 @@ var bomb_count_current: int = 1
 var bomb_radius: int = 1
 var shield_charges: int = 0
 
+# This character's own starting values, captured once in _ready() right after
+# _apply_character_passives() sets them — the floor a cursed powerup's
+# BOMB_COUNT/RADIUS/SHIELD debuffs read against (see apply_curse below). A
+# debuff that could push someone below what their character started with
+# would be punishing the pickup itself rather than the handful of seconds of
+# bonus stat it temporarily hides; capping at "your own base" instead of some
+# global default also means Sapper's extra starting bomb, say, is respected
+# rather than curse-capped down to what everyone else starts with.
+var _base_bomb_count_max: int = 1
+var _base_bomb_radius: int = 1
+var _base_shield_charges: int = 0
+
+# A cursed powerup's debuffs (see apply_curse) — all timed and all reverting
+# on their own, so a randomly unlucky pickup stings for a few seconds rather
+# than for the rest of the round. BOMB_COUNT/RADIUS/SHIELD read as a live cap
+# against the stat itself (see _effective_* below) rather than mutating and
+# later restoring it, so there's nothing to get out of sync if the real stat
+# changes mid-curse (a bomb explodes and refills a charge, a shield genuinely
+# blocks a hit) — the underlying number is never touched, only how much of it
+# is usable right now. SPEED is the one exception: it's a flat percentage cut
+# to the character's *current* speed rather than a floor at their base, since
+# the whole point there is to sting a fast character exactly as much as a slow one.
+var _cursed_bomb_cap_until: float = 0.0    # BOMB_COUNT curse: capacity capped at _base_bomb_count_max
+var _cursed_radius_until: float = 0.0      # RADIUS curse: radius capped at _base_bomb_radius
+var _cursed_slow_until: float = 0.0        # SPEED curse: flat percentage move-speed cut
+var _cursed_shield_cap_until: float = 0.0  # SHIELD curse: usable shield capped at _base_shield_charges
+const CURSE_DURATION := 3.0
+## Flat cut to move_speed while the SPEED curse is active — not floored at the
+## character's base speed like the other three debuffs, so it stings a
+## heavily-upgraded runner exactly as much (in relative terms) as it stings
+## someone who never picked up a speed powerup at all.
+const CURSED_SLOW_FACTOR := 0.75 # 25% slower
+
 func get_current_cell() -> Vector2i:
 	return arena.world_to_cell(position)
 
 func _update_move_speed() -> void:
-	if move_duration > 0.0:
-		move_speed = Consts.CELL_SIZE / move_duration
+	if move_duration <= 0.0:
+		return
+	move_speed = Consts.CELL_SIZE / move_duration
+	if Time.get_ticks_msec() / 1000.0 < _cursed_slow_until:
+		move_speed *= CURSED_SLOW_FACTOR
 
 # Upgrade levels shown on the HUD (0 = base, unrelated to the raw stat values above).
 var bomb_level: int = 0
@@ -243,6 +279,12 @@ func _ready() -> void:
 	GameManager.player_reconnected.connect(_on_player_reconnected)
 	$Portrait.set_character(character_id, Consts.PLAYER_COLORS[(player_id - 1) % Consts.PLAYER_COLORS.size()])
 	_apply_character_passives()
+	# Snapshot this character's own starting stats right after their passives
+	# are applied — the floor a cursed powerup's debuffs cap against, see the
+	# _base_* fields above.
+	_base_bomb_count_max = bomb_count_max
+	_base_bomb_radius = bomb_radius
+	_base_shield_charges = shield_charges
 	_update_move_speed()
 
 ## Every character biases the powerups dropped by the blocks *they* destroy
@@ -794,9 +836,13 @@ func _compute_danger_cells() -> Dictionary:
 		danger[c] = true
 	return danger
 
-## Ground that a shell already in the air is about to land on, from every
-## player's live_bombs — its own index, since a thrown bomb is deliberately kept
-## off the grid.
+## Ground that a shell already in the air is about to land on. Reads the
+## "thrown_shells" group (see Bomb._ready) rather than walking every player's
+## live_bombs — a turret's shell has owner_player == null and would never show
+## up in anyone's live_bombs, so a bot that only checked players would be the
+## one thing on the arena that couldn't see it coming. Grenadier shells still
+## show up here exactly as before; the group holds every thrown Bomb, owned or
+## not.
 ##
 ## Split out of _compute_danger_cells because _bot_update asks this every frame
 ## while the rest of the danger map is only worth rebuilding once per decision:
@@ -804,12 +850,11 @@ func _compute_danger_cells() -> Dictionary:
 ## waited its turn to look would be informed of the shot by the explosion.
 func _incoming_shell_cells() -> Dictionary:
 	var cells := {}
-	for p in get_tree().get_nodes_in_group("players"):
-		for bomb in p.live_bombs:
-			if not is_instance_valid(bomb) or not bomb.thrown or bomb.has_exploded:
-				continue
-			for c in _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast):
-				cells[c] = true
+	for bomb in get_tree().get_nodes_in_group("thrown_shells"):
+		if bomb.has_exploded:
+			continue
+		for c in _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast):
+			cells[c] = true
 	return cells
 
 ## Whether this bot still believes an enemy mine is where it saw one go in.
@@ -856,6 +901,18 @@ func _compute_active_hazard_cells() -> Dictionary:
 	for child in arena.get_children():
 		if child.get_script() == ExplosionScript:
 			hazard[arena.world_to_cell(child.position)] = true
+	# Any contact hazard (see the "hazard_mobs" group note on Bomb._apply_blast)
+	# is exactly this kind of danger too: lethal on touch, right now, no fuse
+	# to outrun. Its next cell counts as well, or a bot would walk straight
+	# into a saw that's mid-step toward the cell it's currently deciding to
+	# flee from.
+	for mob in get_tree().get_nodes_in_group("hazard_mobs"):
+		hazard[mob.cell] = true
+		if mob.next_cell != mob.cell:
+			hazard[mob.next_cell] = true
+	for cloud in get_tree().get_nodes_in_group("gas_clouds"):
+		for c in cloud.active_cells():
+			hazard[c] = true
 	return hazard
 
 func _enemy_at(cell: Vector2i) -> Node:
@@ -1512,9 +1569,32 @@ func _scripted_move_to(target_pos: Vector2, duration: float) -> void:
 
 ## Whether this character puts bombs on the floor at all. The Grenadier does
 ## not: the launcher is what replaces them, and their charges are shells in the
-## air rather than bombs they are carrying.
+## air rather than bombs they are carrying. A BOMB_COUNT curse doesn't live
+## here any more — it caps how much of bomb_count_current is spendable (see
+## _effective_bomb_count_current), not whether placing one is allowed at all.
 func _can_place_bombs() -> bool:
 	return character_id != CharacterId.GRENADIER
+
+## bomb_count_current, capped at this character's own starting bomb capacity
+## while a BOMB_COUNT curse (see apply_curse) is running. Capped, not zeroed —
+## a curse landing on someone who hasn't picked up a single bomb powerup yet
+## does nothing at all, and one landing on someone stacked up on them only
+## hides the stack, never the base charge they started the round with.
+func _effective_bomb_count_current() -> int:
+	if Time.get_ticks_msec() / 1000.0 < _cursed_bomb_cap_until:
+		return mini(bomb_count_current, _base_bomb_count_max)
+	return bomb_count_current
+
+## bomb_radius, unless a RADIUS curse (see apply_curse) is still running —
+## then every bomb placed comes out at this character's own starting radius
+## (_base_bomb_radius, 1 for everyone today) regardless of upgrades, for
+## CURSE_DURATION. Read wherever a bomb's radius would otherwise come straight
+## from bomb_radius, so the curse can't be bypassed by whichever call site
+## forgot to check it.
+func _effective_bomb_radius() -> int:
+	if Time.get_ticks_msec() / 1000.0 < _cursed_radius_until:
+		return mini(bomb_radius, _base_bomb_radius)
+	return bomb_radius
 
 func place_bomb() -> void:
 	if not _can_place_bombs():
@@ -1535,7 +1615,7 @@ func _place_ordnance(as_mine: bool) -> bool:
 	if arena == null:
 		return false
 	var current_cell := get_current_cell()
-	if bomb_count_current < (2 if as_mine else 1) or arena.has_bomb_at(current_cell):
+	if _effective_bomb_count_current() < (2 if as_mine else 1) or arena.has_bomb_at(current_cell):
 		return false
 	var bomb := BombScene.instantiate()
 	bomb.cell = current_cell
@@ -1545,7 +1625,7 @@ func _place_ordnance(as_mine: bool) -> bool:
 	# Half radius, rounded down but never to nothing: a mine that only covered
 	# the cell it sits on could not chain, and a minefield that can't chain is a
 	# collection of unrelated single squares rather than a field.
-	bomb.radius = maxi(1, bomb_radius / 2) if as_mine else bomb_radius
+	bomb.radius = maxi(1, _effective_bomb_radius() / 2) if as_mine else _effective_bomb_radius()
 	# A mine is its own kind of ordnance — it never also inherits the character
 	# passive that shapes that player's ordinary bombs.
 	bomb.is_star_blast = not as_mine and character_id == CharacterId.PYRO
@@ -1922,6 +2002,40 @@ func apply_powerup(type: int) -> void:
 			shield_charges += 1
 	stats_changed.emit()
 
+## A cursed pickup (see Powerup.is_cursed) landed a debuff instead of the buff
+## its type would normally give — the mirror of apply_powerup, one temporary
+## penalty per PowerupType. All four are timed (CURSE_DURATION) rather than a
+## permanent stat cut, and three of them (everything but SPEED) never touch
+## the real stat at all — they just cap how much of it is usable for a few
+## seconds, floored at this character's own starting value (see the
+## _effective_* readers and the _base_* fields above), so there's nothing to
+## restore and nothing a run of bad luck can leave worse than where it found you.
+func apply_curse(type: int) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	match type:
+		Consts.PowerupType.BOMB_COUNT:
+			_cursed_bomb_cap_until = now + CURSE_DURATION
+		Consts.PowerupType.RADIUS:
+			_cursed_radius_until = now + CURSE_DURATION
+		Consts.PowerupType.SPEED:
+			_cursed_slow_until = now + CURSE_DURATION
+			_update_move_speed() # applies the slow this same frame, not on the next natural recompute
+		Consts.PowerupType.SHIELD:
+			_cursed_shield_cap_until = now + CURSE_DURATION
+	stats_changed.emit()
+
+## shield_charges, unless a SHIELD curse (see apply_curse) is still running —
+## then only down to this character's own starting shield count is usable,
+## for CURSE_DURATION. Read by die() to decide whether a shield is available
+## rather than by shield_charges directly, so a curse can hide bonus charges
+## without ever touching the real count: a shield that genuinely blocks a hit
+## during the curse window still spends a real charge (die() decrements
+## shield_charges itself), it just can't dip into the hidden portion to do it.
+func _effective_shield_charges() -> int:
+	if Time.get_ticks_msec() / 1000.0 < _cursed_shield_cap_until:
+		return mini(shield_charges, _base_shield_charges)
+	return shield_charges
+
 const INVULN_DURATION := 1.0
 const INVULN_BLINK_INTERVAL := 0.1
 
@@ -1930,7 +2044,7 @@ var is_invulnerable: bool = false
 func die() -> void:
 	if not alive or is_invulnerable:
 		return
-	if shield_charges > 0:
+	if _effective_shield_charges() > 0:
 		shield_charges -= 1
 		stats_changed.emit()
 		Sfx.play("shield_block")

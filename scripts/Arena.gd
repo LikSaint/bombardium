@@ -5,6 +5,9 @@ extends Node2D
 const BlockScene := preload("res://scenes/Block.tscn")
 const TempWallScene := preload("res://scenes/TempWall.tscn")
 const PowerupScene := preload("res://scenes/Powerup.tscn")
+const SawScene := preload("res://scenes/Saw.tscn")
+const GasCloudScene := preload("res://scenes/GasCloud.tscn")
+const TurretScene := preload("res://scenes/Turret.tscn")
 const WALL_TEXTURE := preload("res://assets/props/wall.png")
 const PlayerScript := preload("res://scripts/Player.gd")
 
@@ -54,6 +57,13 @@ var temp_wall_nodes: Dictionary = {} # Vector2i -> TempWall node; lets an explos
 ## bridge section further down.
 var bridges: Dictionary = {}
 
+## Time this round has been running and how many crates it has cost, for the
+## hazard ramp (see _current_hazard_chance further down). Both reset in
+## generate() rather than relying on a fresh Arena node every round, so a
+## reload can never silently carry either count over.
+var _round_elapsed: float = 0.0
+var _blocks_broken_this_round: int = 0
+
 ## Which terrain the current round is being played on, resolved once per round
 ## in generate() so the Random setting rolls per round. Main reads it to name
 ## the map on screen.
@@ -73,6 +83,8 @@ func generate() -> void:
 	temp_wall_nodes.clear()
 	bridges.clear()
 	_block_density = BLOCK_DENSITY
+	_round_elapsed = 0.0
+	_blocks_broken_this_round = 0
 
 	for x in Consts.GRID_WIDTH:
 		for y in Consts.GRID_HEIGHT:
@@ -252,9 +264,11 @@ func break_bridge_at(cell: Vector2i) -> void:
 			powerups_by_cell.erase(cell)
 		if bombs_by_cell.has(cell):
 			bombs_by_cell[cell].explode()
+		_destroy_hazard_mob_at(cell)
 	queue_redraw()
 
 func _process(delta: float) -> void:
+	_round_elapsed += delta
 	var changed := false
 	for cell in bridges:
 		var bridge: Dictionary = bridges[cell]
@@ -348,21 +362,141 @@ func destroy_block_at(cell: Vector2i, owner_player: Node = null) -> void:
 	blocks_by_cell.erase(cell)
 	cells[cell] = CellState.EMPTY
 
+	# Hazard is rolled before the powerup, and instead of it: a crate gives up
+	# one thing or the other, never both.
+	#
+	# Only for a crate broken by a player. A blast from an ownerless bomb or
+	# hazard object arrives here with owner_player == null, and rolling a
+	# hazard there would let one hazard's blast spawn another, which could
+	# spawn a third — a chain reaction nobody started. Ownerless destruction
+	# also never drops a powerup, for the same reason `_pick_powerup_by_weights`
+	# needs a character's weights to mean anything: there's nobody there to
+	# bias the roll or to collect what fell out.
+	if owner_player != null:
+		# Counted independent of the hazard roll itself — the safe window in
+		# _current_hazard_chance needs this to keep climbing even while every
+		# roll inside it is forced to miss.
+		_blocks_broken_this_round += 1
+		if _roll_hazard(cell):
+			return
+
 	var powerup_type: int = -1
-	var base_chance = Consts.powerup_chance_percent / 100.0
 
 	if owner_player != null:
 		# Whoever broke the block biases what falls out of it, per character
 		# (see Player._apply_character_passives).
 		powerup_type = _pick_powerup_by_weights(owner_player.powerup_weights,
-			base_chance * owner_player.powerup_chance_multiplier)
-	elif randf() < base_chance:
-		# Ownerless destruction (nothing does this today): map setting chance,
-		# then an even roll between the four types.
-		powerup_type = randi() % 4
+			Consts.powerup_chance_percent / 100.0 * owner_player.powerup_chance_multiplier)
 
 	if powerup_type >= 0:
 		_spawn_powerup(cell, powerup_type)
+
+## First safe window, then a ramp keyed to how close the round is to Sudden
+## Death rather than to a fixed clock — see the constants below for why.
+const HAZARD_SAFE_BLOCK_COUNT := 4
+const HAZARD_RAMP_FALLBACK_DURATION := 90.0
+
+## true if a hazard came out of the crate instead — the powerup roll is
+## skipped when this returns true.
+func _roll_hazard(cell: Vector2i) -> bool:
+	if randf() >= _current_hazard_chance():
+		return false
+	var kind := _pick_hazard_kind()
+	if kind < 0:
+		return false
+	match kind:
+		Consts.HazardType.SAW:
+			_spawn_saw(cell)
+		Consts.HazardType.NUKE:
+			_spawn_nuke(cell)
+		Consts.HazardType.TURRET:
+			_spawn_turret(cell)
+		Consts.HazardType.GAS_CLOUD:
+			_spawn_gas_cloud(cell)
+	return true
+
+## Weighted pick among the kinds that currently have somewhere to go (see the
+## per-kind caps in _hazard_kind_available). A kind with no room left is
+## excluded from the draw rather than falling through to "nothing dropped".
+func _pick_hazard_kind() -> int:
+	var pool: Array[int] = []
+	var total := 0
+	for kind in Consts.HAZARD_WEIGHTS.size():
+		if Consts.HAZARD_WEIGHTS[kind] <= 0 or not _hazard_kind_available(kind):
+			continue
+		pool.append(kind)
+		total += Consts.HAZARD_WEIGHTS[kind]
+	if pool.is_empty():
+		return -1
+	var roll := randi() % total
+	var accumulated := 0
+	for kind in pool:
+		accumulated += Consts.HAZARD_WEIGHTS[kind]
+		if roll < accumulated:
+			return kind
+	return -1
+
+func _hazard_kind_available(kind: int) -> bool:
+	match kind:
+		Consts.HazardType.SAW:
+			return get_tree().get_nodes_in_group("saws").size() < MAX_SAWS
+		Consts.HazardType.NUKE:
+			return false # not built yet — weight is 0 so this never actually gets asked
+		Consts.HazardType.TURRET:
+			return get_tree().get_nodes_in_group("turrets").is_empty()
+		Consts.HazardType.GAS_CLOUD:
+			return get_tree().get_nodes_in_group("gas_clouds").is_empty()
+	return false
+
+func _spawn_nuke(_cell: Vector2i) -> void:
+	pass # not built yet — see docs/plan-crate-hazards.md Stage 4
+
+const MAX_SAWS := 2 # an arena, not a shooting gallery — more than this stops reading as individual threats
+
+func _spawn_saw(cell: Vector2i) -> void:
+	var saw := SawScene.instantiate()
+	saw.cell = cell
+	saw.arena = self
+	saw.position = cell_to_world(cell)
+	add_child(saw)
+	Sfx.play("wall_destroy", 0.5)
+
+func _spawn_gas_cloud(cell: Vector2i) -> void:
+	var cloud := GasCloudScene.instantiate()
+	cloud.origin_cell = cell
+	cloud.arena = self
+	cloud.position = cell_to_world(cell)
+	add_child(cloud)
+	Sfx.play("wall_destroy", 0.3)
+
+func _spawn_turret(cell: Vector2i) -> void:
+	var turret := TurretScene.instantiate()
+	turret.cell = cell
+	turret.arena = self
+	turret.position = cell_to_world(cell)
+	add_child(turret)
+	Sfx.play("wall_destroy", 0.6)
+
+## How many crates the round has broken and how long it has run for decide
+## whether a hazard can drop at all, and how likely it is once it can:
+##
+## 1. The first HAZARD_SAFE_BLOCK_COUNT crates broken this round, by anyone,
+##    are a guaranteed miss — not a timer. A player who opens the round by
+##    immediately smashing crates shouldn't eat a hazard sooner than one who
+##    spent the same seconds looking at the map instead.
+## 2. Past that, the chance ramps up with how close the round is to Sudden
+##    Death, not on a fixed clock of its own — the same event that's already
+##    about to start closing the arena in is the one that makes its crates
+##    start turning dangerous, so the two pressures land together instead of
+##    the hazard ramp being an unrelated clock nobody asked for. With Sudden
+##    Death off there's nothing to key off, so the ramp uses a flat fallback
+##    duration instead.
+func _current_hazard_chance() -> float:
+	if _blocks_broken_this_round < HAZARD_SAFE_BLOCK_COUNT:
+		return 0.0
+	var ramp_duration: float = Consts.sudden_death_timer() if Consts.is_sudden_death_enabled() else HAZARD_RAMP_FALLBACK_DURATION
+	var t: float = clampf(_round_elapsed / ramp_duration, 0.0, 1.0)
+	return t * Consts.hazard_chance_percent / 100.0
 
 func _pick_powerup_by_weights(weights: Array[int], effective_chance: float) -> int:
 	# Calculate total weight
@@ -385,9 +519,17 @@ func _pick_powerup_by_weights(weights: Array[int], effective_chance: float) -> i
 
 	return -1
 
+## Fraction of the current (already ramped) hazard chance at which a freshly
+## spawned powerup is cursed instead of a plain buff. Less than one: picking up
+## a powerup happens far more often than a crate rolling a hazard in the first
+## place, and the full chance would turn every second or third pickup on the
+## arena into a trap.
+const CURSED_CHANCE_FACTOR := 0.4
+
 func _spawn_powerup(cell: Vector2i, powerup_type: int) -> void:
 	var powerup := PowerupScene.instantiate()
 	powerup.type = powerup_type
+	powerup.is_cursed = randf() < _current_hazard_chance() * CURSED_CHANCE_FACTOR
 	powerup.position = cell_to_world(cell)
 	add_child(powerup)
 	powerups_by_cell[cell] = powerup
@@ -400,8 +542,16 @@ func try_collect_powerup(cell: Vector2i, player: Node) -> void:
 	if not powerups_by_cell.has(cell):
 		return
 	var type: int = powerups_by_cell[cell].type
+	var cursed: bool = powerups_by_cell[cell].is_cursed
 	powerups_by_cell[cell].queue_free()
 	powerups_by_cell.erase(cell)
+	if cursed:
+		# A different sound on top of the (near-invisible) red glow, so a
+		# cursed pickup is at least distinguishable by ear from a normal one,
+		# even when the tell on screen went unnoticed.
+		Sfx.play("shield_block", 0.8)
+		player.apply_curse(type)
+		return
 	Sfx.play("powerup_pickup")
 	player.apply_powerup(type)
 
@@ -456,8 +606,19 @@ func seal_cell(cell: Vector2i) -> void:
 		powerups_by_cell.erase(cell)
 	if bombs_by_cell.has(cell):
 		bombs_by_cell[cell].explode()
+	_destroy_hazard_mob_at(cell)
 	cells[cell] = CellState.WALL
 	queue_redraw()
+
+## Any contact hazard (see the "hazard_mobs" group note on Bomb._apply_blast)
+## standing on `cell` right now. A linear scan, not an index — there are only
+## ever a couple of these on the arena, so one more dictionary to keep in sync
+## with their tweens isn't worth it.
+func _destroy_hazard_mob_at(cell: Vector2i) -> void:
+	for mob in get_tree().get_nodes_in_group("hazard_mobs"):
+		if mob.cell == cell:
+			mob.destroy()
+			return
 
 func in_bounds(cell: Vector2i) -> bool:
 	return cell.x >= 0 and cell.x < Consts.GRID_WIDTH and cell.y >= 0 and cell.y < Consts.GRID_HEIGHT

@@ -22,8 +22,8 @@ const BAR_SELECTED_COLOR := Color(1.0, 0.65, 0.2, 1)
 
 const COUNTDOWN_SECONDS := 3
 
-enum SettingsRow { ROOM, MAP_SIZE, MAP_LAYOUT, PLAYER_SLOTS, BOTS, RANDOM_WALLS, POWERUP_CHANCE, SUDDEN_DEATH, ROUNDS }
-const SETTINGS_ROW_COUNT := 9
+enum SettingsRow { ROOM, MAP_SIZE, MAP_LAYOUT, PLAYER_SLOTS, BOTS, RANDOM_WALLS, POWERUP_CHANCE, HAZARD_CHANCE, SUDDEN_DEATH, ROUNDS }
+const SETTINGS_ROW_COUNT := 10
 
 var view: String = "settings" # "settings" or "room"
 var settings_selected: int = SettingsRow.ROOM
@@ -48,7 +48,8 @@ var countdown_active: bool = false
 	$SettingsPanel/Rows/RoomRow, $SettingsPanel/Rows/MapSizeRow, $SettingsPanel/Rows/MapLayoutRow,
 	$SettingsPanel/Rows/PlayerSlotsRow,
 	$SettingsPanel/Rows/BotsRow, $SettingsPanel/Rows/RandomWallsRow,
-	$SettingsPanel/Rows/PowerupChanceRow, $SettingsPanel/Rows/SuddenDeathRow, $SettingsPanel/Rows/RoundsRow,
+	$SettingsPanel/Rows/PowerupChanceRow, $SettingsPanel/Rows/HazardChanceRow,
+	$SettingsPanel/Rows/SuddenDeathRow, $SettingsPanel/Rows/RoundsRow,
 ]
 @onready var hotkey_legend: Label = $RoomView/HotkeyLegend
 @onready var join_hint: Label = $RoomView/JoinHint
@@ -96,6 +97,8 @@ func _refresh_settings_texts() -> void:
 	$SettingsPanel/Rows/RandomWallsRow/Value.text = Loc.t("SETTINGS_ON") if Consts.random_indestructible_walls else Loc.t("SETTINGS_OFF")
 	$SettingsPanel/Rows/PowerupChanceRow/Label.text = Loc.t("SETTINGS_POWERUP_CHANCE")
 	$SettingsPanel/Rows/PowerupChanceRow/Value.text = "%d%%" % Consts.powerup_chance_percent
+	$SettingsPanel/Rows/HazardChanceRow/Label.text = Loc.t("SETTINGS_HAZARD_CHANCE")
+	$SettingsPanel/Rows/HazardChanceRow/Value.text = "%d%%" % Consts.hazard_chance_percent
 	$SettingsPanel/Rows/SuddenDeathRow/Label.text = Loc.t("SETTINGS_SUDDEN_DEATH")
 	var sd_label: String = Consts.SUDDEN_DEATH_LABELS[Consts.sudden_death_index]
 	if sd_label == "OFF":
@@ -154,6 +157,8 @@ func _adjust_setting(delta: int) -> void:
 			Consts.set_random_indestructible_walls(not Consts.random_indestructible_walls)
 		SettingsRow.POWERUP_CHANCE:
 			Consts.set_powerup_chance_percent(Consts.powerup_chance_percent + delta * Consts.POWERUP_CHANCE_STEP)
+		SettingsRow.HAZARD_CHANCE:
+			Consts.set_hazard_chance_percent(Consts.hazard_chance_percent + delta * Consts.HAZARD_CHANCE_STEP)
 		SettingsRow.SUDDEN_DEATH:
 			Consts.set_sudden_death_index(Consts.sudden_death_index + delta)
 		SettingsRow.ROUNDS:

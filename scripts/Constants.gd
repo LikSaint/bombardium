@@ -155,6 +155,22 @@ var powerup_chance_percent: int = DEFAULT_POWERUP_CHANCE_PERCENT
 func set_powerup_chance_percent(value: int) -> void:
 	powerup_chance_percent = clampi(value, POWERUP_CHANCE_MIN, POWERUP_CHANCE_MAX)
 
+const HAZARD_CHANCE_MIN := 0
+const HAZARD_CHANCE_MAX := 50   # выше половины ящиков арена перестаёт быть про бомбы
+const HAZARD_CHANCE_STEP := 5
+## Мизерный по умолчанию — это шанс, к которому раунд ещё и подходит не сразу
+## (см. Arena._current_hazard_chance), так что на деле первую половину раунда
+## он ещё ниже. Кто хочет опасностей почаще, поднимает его сам вплоть до
+## HAZARD_CHANCE_MAX; понижать потолок вместе с дефолтом не стали — это две
+## разные ручки, «как часто это вообще случается» и «насколько агрессивно я
+## готов настроить комнату», и первая не должна упираться в то, что выбрал не
+## игрок, а дефолт.
+const DEFAULT_HAZARD_CHANCE_PERCENT := 5
+var hazard_chance_percent: int = DEFAULT_HAZARD_CHANCE_PERCENT
+
+func set_hazard_chance_percent(value: int) -> void:
+	hazard_chance_percent = clampi(value, HAZARD_CHANCE_MIN, HAZARD_CHANCE_MAX)
+
 const ROUNDS_OPTIONS := [3, 5, 7, 9]
 const DEFAULT_ROUNDS_INDEX := 1 # ROUNDS_OPTIONS[1] == 5, matches the old fixed value
 var rounds_index: int = DEFAULT_ROUNDS_INDEX
@@ -408,3 +424,16 @@ const STAT_ICONS := [
 ]
 
 const BOMB_TEXTURE := preload("res://assets/icons/bomb_round.png")
+
+# --- Crate hazards ----------------------------------------------------------
+#
+# What a broken crate spawns instead of a powerup, rolled by Arena._roll_hazard.
+# The cursed powerup (Player.apply_curse) isn't in here — it's not a separate
+# object on the arena, it's a trojan variant of an ordinary powerup pickup.
+
+enum HazardType { SAW, NUKE, TURRET, GAS_CLOUD }
+
+## Order must match HazardType. Weight 0 = that kind is disabled — each kind
+## goes live by raising its own weight above 0, not by touching the roll.
+## NUKE (ungrappled ordnance, not yet built) stays at 0.
+const HAZARD_WEIGHTS := [5, 0, 2, 3]
