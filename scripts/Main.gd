@@ -59,6 +59,9 @@ func _ready() -> void:
 	_spawn_players()
 	_frame_arena()
 	get_viewport().size_changed.connect(_on_viewport_resized)
+	# A window carried to a display of another pixel density can keep its logical
+	# size, in which case only this fires.
+	get_window().dpi_changed.connect(_on_viewport_resized)
 	sudden_death.begin(arena)
 	_refresh_hotkey_hint()
 	Loc.language_changed.connect(_refresh_hotkey_hint)
@@ -85,36 +88,53 @@ func _show_hotkey_hint() -> void:
 	tw.tween_interval(HOTKEY_HINT_VISIBLE_DURATION)
 	tw.tween_property(hotkey_hint, "modulate:a", 0.0, HOTKEY_HINT_FADE_DURATION)
 
-# --- Arena framing ---------------------------------------------------------
+# --- Arena framing and HUD layout -------------------------------------------
 #
 # The arena is a fixed pixel rectangle whose size comes from the map-size
 # setting (9x7 up to 21x17 cells), while the window is whatever the player
-# gives us — a resized macOS window, a Steam Deck's 1280x800, a TV. So the
-# camera zoom is derived from the viewport every time either one changes, and
-# the whole arena always ends up on screen: scaled down when it is too big,
-# scaled up when it would otherwise sit as a small island in the middle.
+# gives us — a resized macOS window, a Steam Deck's 1280x800, a TV, a window
+# dragged onto a monitor of another shape. The aim is that the arena takes as
+# much of the screen as it can and the HUD takes the rest, so nothing is left
+# as dead space: the camera zoom is derived from the viewport every time it
+# changes, and the HUD is laid out around the result.
 #
 # Note that Camera2D.zoom *magnifies* in Godot 4 (2.0 draws the world twice as
 # large, 0.5 half as large) — the reverse of Godot 3, where it divided.
 #
-# The four HUD corner panels live on a CanvasLayer at fixed viewport
-# coordinates and the spawn cells sit in the arena's own corners, so the arena
-# must never grow underneath an occupied panel. Two framings are tried — the
-# arena in the column between the side panels, and the arena in the row between
-# the top and bottom ones — and whichever leaves the arena bigger wins. Panels
-# of players who aren't in the match reserve nothing, so a two-player round
-# gets the entire bottom of the screen to itself.
+# The arena must never grow underneath an occupied HUD panel (the spawn cells
+# sit in its corners). Two framings are tried — SIDES, the arena in the column
+# between the left and right panels, and ROWS, the arena in the row between the
+# top and bottom ones — and whichever lets the arena be bigger wins. Panels of
+# players who aren't in the match reserve nothing.
+#
+# Once the arena is placed, whatever is left on either side of it is the HUD's:
+# the panels are centred in those bars and scaled up to fill them (never below
+# their designed size), and the Backdrop layer paints the bars and the rest of
+# the window in the HUD's own colour. A wide screen therefore gets big side
+# panels rather than a small arena with empty margins.
 
 ## Breathing room between the arena and the screen edge / a HUD panel.
 const ARENA_SCREEN_MARGIN := 16.0
-## Tiny maps on a big screen would otherwise be blown up to a comic scale.
-const ARENA_MAX_ZOOM := 2.0
+## Gap between a HUD panel and the screen edge.
+const HUD_EDGE_MARGIN := 12.0
+## A panel grows to fill the leftover space, but past this it is just a
+## blown-up widget — better to leave the rest to the backdrop.
+const HUD_MAX_SCALE := 2.0
+## High enough that a tiny map on a big screen still fills it; this is only a
+## sanity bound.
+const ARENA_MAX_ZOOM := 6.0
 ## Only reached on a window too small to hold anything; keeps zoom positive.
 const ARENA_MIN_ZOOM := 0.05
 
+enum HudLayout { SIDES, ROWS }
+
+@onready var hud_bars: Array = [$Backdrop/HudBarA, $Backdrop/HudBarB]
+
+## Everything below depends on the viewport size alone, so one signal covers a
+## window resize, a fullscreen toggle, and a window moved to a display of a
+## different size or scale (the stretch factor changes with the window's pixel
+## size). Deferred so the viewport has finished updating when it is measured.
 func _on_viewport_resized() -> void:
-	# Deferred so the HUD panels have re-anchored to the new viewport before
-	# their rects are measured below.
 	_frame_arena.call_deferred()
 	if overlay.visible:
 		_fit_results_block.call_deferred()
@@ -122,11 +142,13 @@ func _on_viewport_resized() -> void:
 func _frame_arena() -> void:
 	var arena_size := Consts.arena_pixel_size()
 	var viewport_size := get_viewport_rect().size
-	var between_columns := _hud_free_rect(viewport_size, true)
-	var between_rows := _hud_free_rect(viewport_size, false)
-	var frame := between_columns
-	if _fit_zoom(arena_size, between_rows.size) > _fit_zoom(arena_size, between_columns.size):
-		frame = between_rows
+	var panel_size := _hud_panel_size()
+	var layout := HudLayout.SIDES
+	var frame := _hud_free_rect(viewport_size, panel_size, HudLayout.SIDES)
+	var rows_frame := _hud_free_rect(viewport_size, panel_size, HudLayout.ROWS)
+	if _fit_zoom(arena_size, rows_frame.size) > _fit_zoom(arena_size, frame.size):
+		layout = HudLayout.ROWS
+		frame = rows_frame
 
 	var zoom := _fit_zoom(arena_size, frame.size)
 	camera.zoom = Vector2(zoom, zoom)
@@ -135,28 +157,45 @@ func _frame_arena() -> void:
 	# shift by the same amount (in world units, hence the division by zoom).
 	camera.position = arena_size / 2.0 - (frame.get_center() - viewport_size / 2.0) / zoom
 
+	var arena_rect := Rect2(frame.get_center() - arena_size * zoom / 2.0, arena_size * zoom)
+	_layout_hud(layout, viewport_size, panel_size, arena_rect)
+
+func _hud_panel_size() -> Vector2:
+	return hud_corners[0].custom_minimum_size
+
+## Corner `i` is slot `i`'s panel: top-left, top-right, bottom-left, bottom-right.
+func _hud_column_occupied(column: int) -> bool:
+	for i in hud_corners.size():
+		if i % 2 == column and hud_corners[i].visible:
+			return true
+	return false
+
+func _hud_row_occupied(row: int) -> bool:
+	for i in hud_corners.size():
+		if i / 2 == row and hud_corners[i].visible:
+			return true
+	return false
+
 ## The part of the viewport the arena may occupy: everything except the HUD
-## panels it has to stay clear of — the left/right ones when `reserve_sides` is
-## true, the top/bottom ones otherwise. Panels are measured rather than
-## hard-coded so moving one in Main.tscn keeps the framing honest.
-func _hud_free_rect(viewport_size: Vector2, reserve_sides: bool) -> Rect2:
+## panels it has to stay clear of, at their designed size — the left/right
+## column for SIDES, the top/bottom row for ROWS.
+func _hud_free_rect(viewport_size: Vector2, panel_size: Vector2, layout: HudLayout) -> Rect2:
 	var left := ARENA_SCREEN_MARGIN
 	var right := ARENA_SCREEN_MARGIN
 	var top := ARENA_SCREEN_MARGIN
 	var bottom := ARENA_SCREEN_MARGIN
-	for corner in hud_corners:
-		if not corner.visible:
-			continue
-		var rect: Rect2 = corner.get_global_rect()
-		if reserve_sides:
-			if rect.get_center().x < viewport_size.x / 2.0:
-				left = maxf(left, rect.end.x + ARENA_SCREEN_MARGIN)
-			else:
-				right = maxf(right, viewport_size.x - rect.position.x + ARENA_SCREEN_MARGIN)
-		elif rect.get_center().y < viewport_size.y / 2.0:
-			top = maxf(top, rect.end.y + ARENA_SCREEN_MARGIN)
-		else:
-			bottom = maxf(bottom, viewport_size.y - rect.position.y + ARENA_SCREEN_MARGIN)
+	var reserve_x := HUD_EDGE_MARGIN + panel_size.x + ARENA_SCREEN_MARGIN
+	var reserve_y := HUD_EDGE_MARGIN + panel_size.y + ARENA_SCREEN_MARGIN
+	if layout == HudLayout.SIDES:
+		if _hud_column_occupied(0):
+			left = reserve_x
+		if _hud_column_occupied(1):
+			right = reserve_x
+	else:
+		if _hud_row_occupied(0):
+			top = reserve_y
+		if _hud_row_occupied(1):
+			bottom = reserve_y
 	return Rect2(left, top, viewport_size.x - left - right, viewport_size.y - top - bottom)
 
 ## Largest zoom at which `content` still fits inside `available`, both in
@@ -166,6 +205,53 @@ func _fit_zoom(content: Vector2, available: Vector2) -> float:
 	if content.x <= 0.0 or content.y <= 0.0:
 		return 1.0
 	return clampf(minf(available.x / content.x, available.y / content.y), ARENA_MIN_ZOOM, ARENA_MAX_ZOOM)
+
+## Fills what the arena left over with the HUD: the two backdrop bars take the
+## exact leftover on either side of the arena, and each panel is scaled to the
+## roomiest size that fits its bar, then centred across the bar and pushed to
+## the screen edge along it.
+func _layout_hud(layout: HudLayout, viewport_size: Vector2, panel_size: Vector2, arena_rect: Rect2) -> void:
+	var bars: Array[Rect2] = []
+	if layout == HudLayout.SIDES:
+		bars.append(Rect2(0.0, 0.0, arena_rect.position.x, viewport_size.y))
+		bars.append(Rect2(arena_rect.end.x, 0.0, viewport_size.x - arena_rect.end.x, viewport_size.y))
+	else:
+		bars.append(Rect2(0.0, 0.0, viewport_size.x, arena_rect.position.y))
+		bars.append(Rect2(0.0, arena_rect.end.y, viewport_size.x, viewport_size.y - arena_rect.end.y))
+	for i in hud_bars.size():
+		hud_bars[i].position = bars[i].position
+		hud_bars[i].size = bars[i].size
+
+	# One scale for all panels, so the four corners stay the same size: the
+	# tightest bar that actually holds a panel decides it. A panel that can't
+	# be enlarged isn't shrunk below its designed size either.
+	var hud_scale := HUD_MAX_SCALE
+	for i in hud_corners.size():
+		if not hud_corners[i].visible:
+			continue
+		var bar: Rect2 = bars[i % 2] if layout == HudLayout.SIDES else bars[i / 2]
+		var room := bar.size - Vector2.ONE * (HUD_EDGE_MARGIN + ARENA_SCREEN_MARGIN)
+		var across := room.x / panel_size.x if layout == HudLayout.SIDES else room.y / panel_size.y
+		# Along the bar the panels share the screen edge to edge, two to a bar.
+		var along_room := viewport_size - Vector2.ONE * HUD_EDGE_MARGIN * 3.0
+		var along := along_room.y / 2.0 / panel_size.y if layout == HudLayout.SIDES else along_room.x / 2.0 / panel_size.x
+		hud_scale = minf(hud_scale, minf(across, along))
+	hud_scale = maxf(hud_scale, 1.0)
+
+	var scaled := panel_size * hud_scale
+	for i in hud_corners.size():
+		var column := i % 2
+		var row := i / 2
+		var corner: Control = hud_corners[i]
+		corner.scale = Vector2(hud_scale, hud_scale)
+		if layout == HudLayout.SIDES:
+			var bar: Rect2 = bars[column]
+			var y := HUD_EDGE_MARGIN if row == 0 else viewport_size.y - HUD_EDGE_MARGIN - scaled.y
+			corner.position = Vector2(bar.position.x + (bar.size.x - scaled.x) / 2.0, y)
+		else:
+			var bar: Rect2 = bars[row]
+			var x := HUD_EDGE_MARGIN if column == 0 else viewport_size.x - HUD_EDGE_MARGIN - scaled.x
+			corner.position = Vector2(x, bar.position.y + (bar.size.y - scaled.y) / 2.0)
 
 func _spawn_players() -> void:
 	var spawn_cells: Array = arena.get_spawn_cells()

@@ -466,8 +466,11 @@ explodes when caught in someone else's blast, is designed but not built — see
 ## Architecture notes
 
 - Grid size is a runtime setting now (`Consts.set_map_size`), chosen in the Lobby — not a fixed
-  const. `Consts.CELL_SIZE` (64px) stays fixed; `Main._fit_camera_to_arena()` zooms the camera to
-  fit whichever map size was picked inside the current window/viewport size.
+  const. `Consts.CELL_SIZE` (64px) stays fixed; `Main._frame_arena()` zooms the camera so the arena
+  takes as much of the window as it can, and `Main._layout_hud()` gives the leftover to the HUD: the
+  four corner panels are scaled up (to 2x) to fill the free side or top/bottom bars, and a backdrop
+  layer paints the bars in the HUD colour. It re-runs on every viewport size or DPI change, so
+  resizing the window, toggling fullscreen or dragging it to another display re-fits mid-match.
 - Window opens maximized (`window/size/mode=2`; fullscreen on Linux via the `window/size/mode.linuxbsd=3`
   override, which is what the Steam Deck uses) with stretch aspect `expand`, so the game fills
   whatever screen it's on rather than a fixed small box; `default_texture_filter=0` (Nearest) keeps

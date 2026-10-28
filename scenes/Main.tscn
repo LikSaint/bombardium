@@ -21,6 +21,25 @@ script = ExtResource("5")
 [node name="Camera2D" type="Camera2D" parent="."]
 position = Vector2(416, 352)
 
+; Sits behind the world (layer -1): the HUD's own colour for whatever part of the
+; window the arena doesn't cover. Main.gd sizes the two bars to the leftover.
+[node name="Backdrop" type="CanvasLayer" parent="."]
+layer = -1
+
+[node name="Fill" type="ColorRect" parent="Backdrop"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.055, 0.063, 0.09, 1)
+
+[node name="HudBarA" type="ColorRect" parent="Backdrop"]
+mouse_filter = 2
+color = Color(0.1, 0.11, 0.16, 1)
+
+[node name="HudBarB" type="ColorRect" parent="Backdrop"]
+mouse_filter = 2
+color = Color(0.1, 0.11, 0.16, 1)
+
 [node name="UI" type="CanvasLayer" parent="."]
 
 [node name="Overlay" type="ColorRect" parent="UI"]
@@ -134,38 +153,16 @@ offset_top = -120.0
 offset_bottom = -10.0
 alignment = 1
 
+; The four corner panels are placed and scaled by Main.gd (_layout_hud) to fill
+; whatever the arena leaves free, so they carry no anchors or offsets here.
 [node name="HudTopLeft" parent="UI" instance=ExtResource("3")]
-offset_left = 12.0
-offset_top = 12.0
-offset_right = 222.0
-offset_bottom = 108.0
 
 [node name="HudTopRight" parent="UI" instance=ExtResource("3")]
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -222.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = 108.0
 mirrored = true
 
 [node name="HudBottomLeft" parent="UI" instance=ExtResource("3")]
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 12.0
-offset_top = -108.0
-offset_right = 222.0
-offset_bottom = -12.0
 
 [node name="HudBottomRight" parent="UI" instance=ExtResource("3")]
-anchor_left = 1.0
-anchor_right = 1.0
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = -222.0
-offset_top = -108.0
-offset_right = -12.0
-offset_bottom = -12.0
 mirrored = true
 
 [node name="PauseMenu" parent="." instance=ExtResource("4")]
