@@ -3,7 +3,6 @@ extends Node
 
 const CELL_SIZE := 64
 const MAX_PLAYERS := 4
-const DEVICE_NONE := -2 # sentinel: slot's controller disconnected, nobody bound yet
 const DEVICE_BOT := -3 # sentinel: slot is AI-controlled, no physical device
 
 const MAP_SIZES := [

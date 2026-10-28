@@ -58,7 +58,7 @@ const NINTENDO_LABELS := {
 ## Empty string for a bot or a currently-disconnected slot — neither has a
 ## real input device to describe.
 func label(device_id: int, action: int) -> String:
-	if device_id == Consts.DEVICE_BOT or device_id == Consts.DEVICE_NONE:
+	if device_id == Consts.DEVICE_BOT:
 		return ""
 	if device_id == -1:
 		return KEYBOARD_LABELS.get(action, "")

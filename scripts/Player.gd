@@ -66,6 +66,41 @@ var _sprint_dir: Vector2i = Vector2i.ZERO
 const KICK_BASE_DISTANCE := 2
 var kick_distance: int = KICK_BASE_DISTANCE
 
+# --- Hockey Player: digging in ---------------------------------------------
+#
+# The ability button sits the Hockey Player down in a defensive stance: they crouch,
+# and a shield appears on them. While in it they cannot walk, kick or put bombs down —
+# it is a commitment, not a shield they carry about — and the next thing that would
+# have hurt them doesn't: the hit is absorbed, no damage and no red flash, they are
+# simply thrown out of the stance (the crouch ends and the shield fades). They are
+# untouchable for DEFENSE_BREAK_GRACE afterwards so the rest of the same blast can't
+# finish the job, with nothing drawn for it. Pressing the button again leaves the
+# stance voluntarily. Either way the ability is then on DEFENSE_COOLDOWN, so it is a
+# way to survive one bad moment, not a place to live.
+const DEFENSE_COOLDOWN := 2.0
+const DEFENSE_BREAK_GRACE := 1.0
+var _defending: bool = false
+
+## The crouch is the portrait squashed down and wide, put back exactly as it was on
+## the way out — see _set_crouch.
+const CROUCH_SCALE := Vector2(1.1, 0.78)
+const CROUCH_DROP := 7.0
+const CROUCH_TIME := 0.12
+var _crouched: bool = false
+var _portrait_rest_known: bool = false
+var _portrait_rest_scale: Vector2 = Vector2.ONE
+var _portrait_rest_pos: Vector2 = Vector2.ZERO
+var _crouch_tween: Tween = null
+
+## The shield on the stance is its own node, added after the portrait so it draws over
+## the character rather than behind them like everything Player._draw paints.
+var _shield_overlay: Node2D = null
+## 1.0 the moment the stance ends, draining to 0: the shield swells and fades rather than
+## blinking out, which is what says "it was knocked away" and not "it was switched off".
+var _shield_fade: float = 0.0
+const SHIELD_FADE_TIME := 0.3
+const DEFENSE_SHIELD_SCALE := 0.42 # of the icon's own pixels
+
 # Half-extent of the box tested against the grid. Smaller than the cell so a
 # player lined up in a corridor never clips the walls flanking it.
 const PLAYER_HALF_EXTENT := 20.0
@@ -132,7 +167,7 @@ const BOT_MINE_MEMORY_MAX := 10.0
 # exists to keep it from being artillery.
 #
 # How far a shell goes is the one thing the player controls, and it is decided
-# by how long the bomb button is held rather than by aiming:
+# by how long the ability button is held rather than by aiming:
 #
 #   * A tap throws two cells (GRENADE_MIN_RANGE). The blast is the launcher's full
 #     radius on three sides; only the arm pointing back at the thrower is cut, to
@@ -367,6 +402,7 @@ func _apply_character_passives() -> void:
 			move_duration *= 0.9
 			speed_level += 1
 			shield_charges += 1
+			ability_cooldown = DEFENSE_COOLDOWN
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — more bombs, more pucks
 		CharacterId.MAGNET:
 			# No radius bonus: a blast that walks itself onto the target doesn't
@@ -395,7 +431,7 @@ func _apply_character_passives() -> void:
 			powerup_weights = [3, 1, 1, 1]
 			shield_charges += 1
 		CharacterId.GRENADIER:
-			# The launcher is on the bomb button and an ordinary bomb on the ability
+			# The launcher is on the ability button and an ordinary bomb on the bomb
 			# button, out of one pool of charges: a shell in the air and a bomb on
 			# the floor each cost one and each comes back when it goes off. The pool
 			# starts at GRENADE_START_SHELLS — a single shell is too easy to walk
@@ -422,20 +458,22 @@ func _on_player_reconnected(p_id: int, device: int) -> void:
 	if p_id != player_id:
 		return
 	device_id = device
+	# A person taking over a bot's slot (see LateJoin) arrives by this same path:
+	# from here on the character listens to them, not to the AI.
+	is_bot = false
 
-## Also drop the old index on disconnect, rather than keeping it: another pad
-## plugged in afterwards can be handed that very index, and would then drive
-## this orphaned character without ever claiming it.
+## The pad this character was on is gone, and a bot plays it from now on — mid-move,
+## mid-charge, whatever it was doing. (It used to stand there dead to the world until
+## the pad came back; the slot can be taken back at any time by joining again.)
 func _on_player_disconnected(p_id: int) -> void:
 	if p_id != player_id:
 		return
-	device_id = Consts.DEVICE_NONE
-
-func _is_disconnected() -> bool:
-	return device_id == Consts.DEVICE_NONE
+	device_id = Consts.DEVICE_BOT
+	is_bot = true
+	_cancel_charge()
 
 func _input(event: InputEvent) -> void:
-	if not alive or _is_disconnected():
+	if not alive:
 		return
 	# The ability button is the one input that is read on release as well as on
 	# press, because the Grenadier's shot is decided by how long it was held
@@ -466,26 +504,21 @@ func _input(event: InputEvent) -> void:
 				if event.pressed:
 					pickup_weapon()
 
-## The bomb button. For the Grenadier this is the launcher — press to start a charge,
-## release to throw (the bomb they can put on the floor is on the ability button,
-## see _ability_input). Everyone else drops a bomb on the press and ignores the
-## release.
+## The bomb button: an ordinary bomb on the press, for every character without
+## exception — the Grenadier included — and the release is ignored. What makes a
+## character different lives on the ability button (_ability_input).
 func _primary_input(pressed: bool) -> void:
-	if character_id == CharacterId.GRENADIER:
-		_charge_input(pressed)
-		return
 	if pressed:
 		place_bomb()
 
-## The ability button. For the Grenadier it is the ordinary bomb: the launcher takes
-## the bomb button (_primary_input), and the two used to be one thing on two buttons,
-## which invited holding one and tapping the other and cancelling your own charge. A
-## different action on each keeps that from happening. Everyone else uses their
-## ability.
+## The ability button. For the Grenadier it is the launcher — press to start a charge,
+## release to throw, so it is read on the release as well as the press — and for
+## everyone else it fires their ability on the press. (The launcher has lived on the
+## bomb button too; it moved here so that Space is an ordinary bomb for everyone, with
+## the character-specific action on the one other button.)
 func _ability_input(pressed: bool) -> void:
 	if character_id == CharacterId.GRENADIER:
-		if pressed:
-			place_bomb()
+		_charge_input(pressed)
 		return
 	if pressed:
 		use_ability()
@@ -533,6 +566,12 @@ func _physics_process(delta: float) -> void:
 		$Portrait.set_walking(false)
 		return
 
+	# Dug in: turning still works (above), walking does not.
+	if _defending:
+		_sprint_charge = 0.0
+		$Portrait.set_walking(false)
+		return
+
 	_update_sprint(dir, delta)
 
 	if dir != Vector2i.ZERO:
@@ -570,8 +609,6 @@ func _sprint_factor() -> float:
 func _poll_move_dir() -> Vector2i:
 	var x := 0.0
 	var y := 0.0
-	if _is_disconnected():
-		return Vector2i.ZERO
 	if device_id == -1:
 		if Input.is_key_pressed(KEY_A):
 			x -= 1
@@ -603,8 +640,6 @@ func _poll_move_dir() -> Vector2i:
 # key/axis edge, not just whichever axis currently wins the diagonal tie-break.
 func _held_dirs() -> Dictionary:
 	var held := {}
-	if _is_disconnected():
-		return held
 	if device_id == -1:
 		held[Consts.DIR_LEFT] = Input.is_key_pressed(KEY_A)
 		held[Consts.DIR_RIGHT] = Input.is_key_pressed(KEY_D)
@@ -848,6 +883,10 @@ func _compute_danger_cells() -> Dictionary:
 	var danger := {}
 	for bomb_cell in arena.bombs_by_cell.keys():
 		var bomb = arena.bombs_by_cell[bomb_cell]
+		# Nothing to fear from a bomb that cannot hurt this bot: its own, when it is
+		# immune to them (see is_immune_to_own_blast).
+		if bomb.owner_player == self and is_immune_to_own_blast():
+			continue
 		# A forgotten mine is not merely un-feared, it is *not there* as far as
 		# this bot is concerned: leaving its footprint out of the danger map is
 		# what lets the bot walk in, stand on it and take the hit.
@@ -928,6 +967,8 @@ func _compute_active_hazard_cells() -> Dictionary:
 	var hazard := {}
 	for child in arena.get_children():
 		if child.get_script() == ExplosionScript:
+			if child.owner_player == self and is_immune_to_own_blast():
+				continue
 			hazard[arena.world_to_cell(child.position)] = true
 	# Any contact hazard (see the "hazard_mobs" group note on Bomb._apply_blast)
 	# is exactly this kind of danger too: lethal on touch, right now, no fuse
@@ -1618,6 +1659,8 @@ func _effective_bomb_radius() -> int:
 	return bomb_radius
 
 func place_bomb() -> void:
+	if _defending:
+		return
 	_place_ordnance(false)
 
 ## Bombs and the Miner's mines come out of one pool, not two, so seeding ground
@@ -1742,8 +1785,6 @@ func _charged_range() -> int:
 ## A keyboard needs both keys; a stick or D-pad needs both axes past the deadzone and
 ## roughly balanced, so a straight push with a slight lean is still straight.
 func _diagonal_held() -> Vector2i:
-	if _is_disconnected():
-		return Vector2i.ZERO
 	var v := Vector2.ZERO
 	if device_id == -1:
 		v.x = float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A))
@@ -1798,7 +1839,7 @@ func _cancel_charge() -> void:
 
 func _process(delta: float) -> void:
 	if _charge_time >= 0.0:
-		if not alive or _is_disconnected():
+		if not alive:
 			_cancel_charge()
 		else:
 			_charge_time += delta
@@ -1808,7 +1849,11 @@ func _process(delta: float) -> void:
 				_charge_diagonal_at = Time.get_ticks_msec() / 1000.0
 	# The dial stays on screen through the cooldown as well, so the redraw has to
 	# outlast the charge that put it there.
-	if _charge_time >= 0.0 or (character_id == CharacterId.GRENADIER and ability_on_cooldown):
+	if _shield_fade > 0.0:
+		_shield_fade = maxf(0.0, _shield_fade - delta / SHIELD_FADE_TIME)
+	if _shield_overlay != null and (_defending or _shield_fade > 0.0):
+		_shield_overlay.queue_redraw()
+	if _charge_time >= 0.0 or (_has_cooldown_dial() and ability_on_cooldown):
 		queue_redraw()
 
 const CHARGE_RING_RADIUS := 26.0
@@ -1841,7 +1886,7 @@ func _draw() -> void:
 	if _charge_time >= 0.0:
 		_draw_shot_preview()
 		_draw_charge_dial()
-	elif character_id == CharacterId.GRENADIER and ability_on_cooldown:
+	elif _has_cooldown_dial() and ability_on_cooldown:
 		_draw_cooldown_dial()
 
 ## Where the shell would come down if the button were let go this instant: the
@@ -1903,6 +1948,28 @@ func _draw_charge_dial() -> void:
 ## `left` instead of a filled fraction, so the cooldown is exactly the charge
 ## animation played with time reversed and it retreats anticlockwise as a
 ## direct consequence rather than from a separately-chosen sign.
+## Whose cooldown is worth drawing: the ones long enough to wait on. Everyone else's is
+## a fraction of a second and the dial would only flicker.
+func _has_cooldown_dial() -> bool:
+	return character_id == CharacterId.GRENADIER or character_id == CharacterId.BOMB_KICKER
+
+const DEFENSE_GLOW_COLOR := Color(0.45, 0.72, 1.0)
+
+## The shield on the dug-in stance, held up over the character's front: the icon the
+## HUD uses for shields, with a soft glow behind it. After the stance ends it swells
+## and fades (_shield_fade) instead of just vanishing.
+func _draw_defense_shield() -> void:
+	var alpha := 1.0 if _defending else _shield_fade
+	if alpha <= 0.0:
+		return
+	var tex: Texture2D = Consts.STAT_ICONS[Consts.PowerupType.SHIELD]
+	var swell := 1.0 if _defending else 1.0 + (1.0 - _shield_fade) * 0.6
+	var size := tex.get_size() * DEFENSE_SHIELD_SCALE * swell
+	var centre := Vector2(0.0, 8.0)
+	var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * TAU * 1.5)
+	_shield_overlay.draw_circle(centre, size.x * 0.62, Color(DEFENSE_GLOW_COLOR, (0.16 + 0.08 * pulse) * alpha))
+	_shield_overlay.draw_texture_rect(tex, Rect2(centre - size / 2.0, size), false, Color(1, 1, 1, alpha))
+
 func _draw_cooldown_dial() -> void:
 	if _ability_timer == null or ability_cooldown <= 0.0:
 		return
@@ -1993,6 +2060,76 @@ func _on_owned_bomb_exploded(bomb: Node) -> void:
 	live_bombs.erase(bomb)
 	bomb_count_current = min(bomb_count_current + 1, bomb_count_max)
 
+## Held rather than fired and forgotten: the cooldown dial reads time_left off the
+## timer, so there is one clock rather than a second one kept in step.
+func _start_ability_cooldown() -> void:
+	ability_on_cooldown = true
+	_ability_timer = get_tree().create_timer(ability_cooldown)
+	# The redraw matters as much as the flag: _process stops asking for one the
+	# moment the cooldown is over, and a CanvasItem keeps whatever it last drew
+	# until something asks again — which would leave the spent dial painted.
+	_ability_timer.timeout.connect(func():
+		ability_on_cooldown = false
+		queue_redraw())
+
+## Sit down in the defensive stance: crouch, and raise the shield.
+func _enter_defense() -> void:
+	_defending = true
+	_shield_fade = 0.0
+	_cancel_charge()
+	_ensure_shield_overlay()
+	_set_crouch(true)
+	Sfx.play("wall_place", 0.8)
+
+## Leave the stance, however that came about, and start the cooldown: stand up, and the
+## shield swells and fades.
+func _exit_defense() -> void:
+	if not _defending:
+		return
+	_defending = false
+	_shield_fade = 1.0
+	_set_crouch(false)
+	_start_ability_cooldown()
+
+func _ensure_shield_overlay() -> void:
+	if _shield_overlay != null:
+		return
+	_shield_overlay = Node2D.new()
+	_shield_overlay.draw.connect(_draw_defense_shield)
+	add_child(_shield_overlay)
+
+## Squash the portrait down and wide, or put it back. The resting scale and position
+## are read once, the first time, and restored exactly, whatever tween was running —
+## reading them again on a later entry would catch the sprite mid-way back up from the
+## last one — so entering and leaving the stance over and over cannot drift it.
+## `instant` skips the tween, which the death animation needs: it reads the portrait's
+## current scale as its own starting point.
+func _set_crouch(on: bool, instant: bool = false) -> void:
+	var portrait: Node2D = $Portrait
+	if not _portrait_rest_known:
+		_portrait_rest_scale = portrait.scale
+		_portrait_rest_pos = portrait.position
+		_portrait_rest_known = true
+	if on:
+		_crouched = true
+	elif not _crouched:
+		return
+	if not on:
+		_crouched = false
+	var to_scale: Vector2 = _portrait_rest_scale * CROUCH_SCALE if on else _portrait_rest_scale
+	var to_pos: Vector2 = _portrait_rest_pos + Vector2(0.0, CROUCH_DROP) if on else _portrait_rest_pos
+	if _crouch_tween != null:
+		_crouch_tween.kill()
+		_crouch_tween = null
+	if instant:
+		portrait.scale = to_scale
+		portrait.position = to_pos
+		return
+	_crouch_tween = create_tween()
+	_crouch_tween.set_parallel(true)
+	_crouch_tween.tween_property(portrait, "scale", to_scale, CROUCH_TIME)
+	_crouch_tween.tween_property(portrait, "position", to_pos, CROUCH_TIME)
+
 func use_ability() -> void:
 	if ability_on_cooldown:
 		return
@@ -2006,17 +2143,16 @@ func use_ability() -> void:
 			used = _place_ordnance(true)
 		CharacterId.GRENADIER:
 			used = _throw_grenade()
+		CharacterId.BOMB_KICKER:
+			# A toggle, and the cooldown starts when the stance *ends* rather than
+			# when it begins — see _exit_defense — so it bypasses the generic one.
+			if _defending:
+				_exit_defense()
+			else:
+				_enter_defense()
+			return
 	if used:
-		ability_on_cooldown = true
-		# Held rather than fired and forgotten: the Grenadier's dial reads time_left
-		# off it, so there is one clock rather than a second one kept in step.
-		_ability_timer = get_tree().create_timer(ability_cooldown)
-		# The redraw matters as much as the flag: _process stops asking for one the
-		# moment the cooldown is over, and a CanvasItem keeps whatever it last drew
-		# until something asks again — which would leave the spent dial painted.
-		_ability_timer.timeout.connect(func():
-			ability_on_cooldown = false
-			queue_redraw())
+		_start_ability_cooldown()
 
 ## Drops a temp wall on the Engineer's own cell — passable for them (see
 ## Arena.is_walkable_for), solid for everyone else, bombs, and explosions.
@@ -2132,6 +2268,14 @@ func _effective_shield_charges() -> int:
 		return mini(shield_charges, _base_shield_charges)
 	return shield_charges
 
+## The Pyro is not hurt by an explosion from one of their own bombs — only inside that
+## bomb's own blast zone, and only their own: a bomb of somebody else's that theirs
+## sets off by chain reaction is still somebody else's. It is the other half of a kit
+## that is all about getting the biggest blast onto the map, which used to carry the
+## price of having to run from every bomb they put down.
+func is_immune_to_own_blast() -> bool:
+	return character_id == CharacterId.PYRO
+
 const INVULN_DURATION := 1.0
 const INVULN_BLINK_INTERVAL := 0.1
 
@@ -2139,6 +2283,17 @@ var is_invulnerable: bool = false
 
 func die() -> void:
 	if not alive or is_invulnerable:
+		return
+	# Dug in: the hit is absorbed, costs nothing — not even a shield charge — and
+	# throws the Hockey Player out of the stance. No red flash: nothing hurt them, they
+	# were just knocked out of it. A short invulnerability follows, drawn as nothing at
+	# all, so the rest of the same blast or the next tick of the same fire can't land on
+	# the very next frame.
+	if _defending:
+		_exit_defense()
+		Sfx.play("shield_block")
+		is_invulnerable = true
+		get_tree().create_timer(DEFENSE_BREAK_GRACE).timeout.connect(_end_invulnerability)
 		return
 	if _effective_shield_charges() > 0:
 		shield_charges -= 1
@@ -2152,6 +2307,11 @@ const DEATH_DURATION := 0.7
 
 func _kill() -> void:
 	_cancel_charge()
+	_defending = false
+	_set_crouch(false, true)
+	if _shield_overlay != null:
+		_shield_overlay.queue_free()
+		_shield_overlay = null
 	alive = false
 	$Portrait.set_walking(false)
 	_play_death_animation()

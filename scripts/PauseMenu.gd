@@ -113,7 +113,9 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if not is_open:
-		if _is_toggle(event):
+		# A device that is not playing has no game to pause: a button on it is a request
+		# to join (see LateJoin), keyboard included.
+		if _is_toggle(event) and GameManager.device_in_match(device):
 			Sfx.play_menu()
 			_open(device)
 		return

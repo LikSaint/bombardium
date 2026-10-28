@@ -1,6 +1,8 @@
 extends Node2D
 
 const PlayerScene := preload("res://scenes/Player.tscn")
+const ArenaScript := preload("res://scripts/Arena.gd")
+const LateJoinScript := preload("res://scripts/LateJoin.gd")
 const LobbyScenePath := "res://scenes/Lobby.tscn"
 
 @onready var arena: Node2D = $Arena
@@ -57,6 +59,7 @@ func _ready() -> void:
 	# Spawning first: it binds the HUD corners, and which of them are on screen
 	# decides how much room the arena gets (see _frame_arena).
 	_spawn_players()
+	_setup_late_join()
 	_frame_arena()
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	# A window carried to a display of another pixel density can keep its logical
@@ -253,6 +256,152 @@ func _layout_hud(layout: HudLayout, viewport_size: Vector2, panel_size: Vector2,
 			var x := HUD_EDGE_MARGIN if column == 0 else viewport_size.x - HUD_EDGE_MARGIN - scaled.x
 			corner.position = Vector2(x, bar.position.y + (bar.size.y - scaled.y) / 2.0)
 
+# --- Joining a match in progress ---------------------------------------------
+
+## How long a match with nobody left in it but bots carries on before it ends, unless
+## somebody sits down: the pads that were playing it are all gone, so nobody is watching.
+const NO_HUMANS_GRACE := 5.0
+var _no_humans_left: float = NO_HUMANS_GRACE
+var _no_players_label: Label = null
+
+func _setup_late_join() -> void:
+	var late_join := Node.new()
+	late_join.set_script(LateJoinScript)
+	late_join.main = self
+	add_child(late_join)
+	refresh_free_slot_placeholder()
+	_no_players_label = Label.new()
+	_no_players_label.anchor_left = 0.5
+	_no_players_label.anchor_right = 0.5
+	_no_players_label.offset_left = -300.0
+	_no_players_label.offset_right = 300.0
+	_no_players_label.offset_top = 84.0
+	_no_players_label.offset_bottom = 124.0
+	_no_players_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_no_players_label.add_theme_font_size_override("font_size", 24)
+	_no_players_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2))
+	_no_players_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_no_players_label.add_theme_constant_override("outline_size", 8)
+	_no_players_label.visible = false
+	$UI.add_child(_no_players_label)
+
+## A match with only bots left in it (every pad that was playing has gone) ends after
+## NO_HUMANS_GRACE seconds, with the count shown, unless a person joins in the meantime
+## (see LateJoin). Not counted while paused or over a results screen — those have their
+## own timings — and it starts over each time someone is there.
+func _process(delta: float) -> void:
+	if _no_players_label == null:
+		return
+	if _has_human_player() or overlay.visible or _match_over_active or get_tree().paused:
+		_no_humans_left = NO_HUMANS_GRACE
+		_no_players_label.visible = false
+		return
+	_no_humans_left -= delta
+	_no_players_label.visible = true
+	_no_players_label.text = Loc.t("NO_PLAYERS_LEFT", [maxi(1, ceili(_no_humans_left))])
+	if _no_humans_left <= 0.0:
+		set_process(false)
+		GameManager.leave_to_lobby()
+		get_tree().change_scene_to_file(LobbyScenePath)
+#
+# The interaction itself — press any button, pick which seat, confirm — is LateJoin.gd;
+# this is what it asks of the match. A seat can be taken in two ways: the first free
+# slot (the match was started with fewer players than it has slots), which spawns a new
+# player, or a bot's, which the newcomer takes over.
+
+## Whether a person may join right now: not while paused, over a results screen or
+## the match-over menu, and not once the round has ended.
+func late_join_allowed() -> bool:
+	return not (get_tree().paused or overlay.visible or _match_over_active or GameManager.round_over)
+
+## The seats a newcomer can pick between, as slot indices in screen order: every bot,
+## and the first free slot. Only the first free one, because the slots fill in order and
+## a gap in the list would be a player who doesn't exist.
+func join_candidates() -> Array[int]:
+	var out: Array[int] = []
+	var slots := GameManager.player_slots
+	for i in slots.size():
+		if slots[i]["device"] == Consts.DEVICE_BOT:
+			out.append(i)
+	var free := _free_slot_index()
+	if free >= 0:
+		out.append(free)
+	return out
+
+## The first slot nobody holds, or -1 if the match is full.
+func _free_slot_index() -> int:
+	var index := GameManager.player_slots.size()
+	if index < mini(Consts.configured_player_slots, hud_corners.size()):
+		return index
+	return -1
+
+## Shows the "press any button" placeholder on the first free slot's corner, if there
+## is one — an empty panel with nothing in it but the invitation.
+func refresh_free_slot_placeholder() -> void:
+	var free := _free_slot_index()
+	for i in range(GameManager.player_slots.size(), hud_corners.size()):
+		if i == free:
+			hud_corners[i].show_empty_slot()
+		else:
+			hud_corners[i].hide_empty_slot()
+	_frame_arena.call_deferred()
+
+## Where a player joining mid-round enters: their corner's spawn cell, or the nearest
+## open cell if that has been built over or blown up since. Returns (-1, -1) if there
+## is nowhere within a few cells.
+func _late_spawn_cell(slot_index: int) -> Vector2i:
+	var home: Vector2i = arena.get_spawn_cells()[slot_index]
+	var best := Vector2i(-1, -1)
+	var best_dist := 1 << 30
+	for dx in range(-3, 4):
+		for dy in range(-3, 4):
+			var c := home + Vector2i(dx, dy)
+			if not arena.in_bounds(c) or arena.get_cell_state(c) != ArenaScript.CellState.EMPTY:
+				continue
+			if arena.is_block(c) or arena.has_bomb_at(c) or arena.is_pit(c):
+				continue
+			var d := absi(dx) + absi(dy)
+			if d < best_dist:
+				best_dist = d
+				best = c
+	return best
+
+## Seats `device` at `slot_index` (one of join_candidates()). Returns whether it worked.
+func join_slot(device: int, slot_index: int) -> bool:
+	if not late_join_allowed() or GameManager.device_in_match(device):
+		return false
+	var slots := GameManager.player_slots
+	if slot_index == _free_slot_index():
+		return _join_free_slot(device)
+	if slot_index >= 0 and slot_index < slots.size() and slots[slot_index]["device"] == Consts.DEVICE_BOT:
+		slots[slot_index]["device"] = device
+		GameManager.player_reconnected.emit(slots[slot_index]["id"], device)
+		return true
+	return false
+
+func _join_free_slot(device: int) -> bool:
+	var index := GameManager.player_slots.size()
+	var cell := _late_spawn_cell(index)
+	if cell == Vector2i(-1, -1):
+		return false
+	var slot := {"id": index + 1, "device": device, "character_id": randi() % Consts.CHARACTER_COUNT}
+	if not GameManager.join_round(slot["id"]):
+		return false
+	GameManager.player_slots.append(slot)
+	var p := PlayerScene.instantiate()
+	p.player_id = slot["id"]
+	p.device_id = device
+	p.character_id = slot["character_id"]
+	p.position = arena.cell_to_world(cell)
+	arena.add_child(p)
+	p.arena = arena
+	hud_corners[index].bind(p)
+	# A second of grace: they appear into a fight that is already going on.
+	p._start_invulnerability()
+	# The next free slot, if any, gets the placeholder now; the arena is refitted.
+	refresh_free_slot_placeholder()
+	return true
+
 func _spawn_players() -> void:
 	var spawn_cells: Array = arena.get_spawn_cells()
 	var player_ids: Array[int] = []
@@ -381,12 +530,10 @@ func _on_round_ended(winner_id: int) -> void:
 	# HUD corner — the same arrows-over-the-portrait UI a dead player gets
 	# mid-round (see PlayerHudCorner.begin_winner_repick), not a separate
 	# screen-center prompt. Skipped when the match is over (the whole line-up
-	# is re-chosen in the lobby anyway) and for bots or a disconnected pad,
-	# which have nobody to press the arrows.
+	# is re-chosen in the lobby anyway). A bot winner re-picks on its own.
 	if not match_over and winner_id > 0:
 		for corner in hud_corners:
-			if corner.player != null and corner.player.player_id == winner_id \
-					and corner.player.device_id != Consts.DEVICE_BOT and corner.player.device_id != Consts.DEVICE_NONE:
+			if corner.player != null and corner.player.player_id == winner_id:
 				corner.begin_winner_repick()
 				break
 
@@ -424,10 +571,7 @@ func _on_round_ended(winner_id: int) -> void:
 	get_tree().reload_current_scene()
 
 func _has_human_player() -> bool:
-	for slot in GameManager.player_slots:
-		if slot["device"] != Consts.DEVICE_BOT and slot["device"] != Consts.DEVICE_NONE:
-			return true
-	return false
+	return GameManager.has_human()
 
 ## Puts up the Restart/Lobby/Quit row and hands input over to it (_input,
 ## below) instead of counting down — see the section note above

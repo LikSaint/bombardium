@@ -136,11 +136,11 @@ In-match:
 | Bomb-Master (Сапёр) | +1 bomb, +1 shield, from the start | **No fuse at all** — every bomb you place is a remote mine (blinking antenna, no ticking Timer) that only goes off when you press this |
 | Parkour Runner (Паркурщик) | +25% move speed, +1 shield | Double-tap a direction to hop over a crate, a bomb, **or an indestructible wall** (no button) |
 | Engineer | +1 bomb | Place a temp wall (12s) on your own cell — passable for you only, destroyed early by a blast. **One wall per bomb you have** |
-| Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs | Every bomb explodes in a diamond and punches through crates |
-| Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, and skating: unbroken straight-line running charges speed up to 1.6x over 0.8s | Kick the bomb in front of you **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide |
+| Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs, and **is not hurt by an explosion from their own bombs** (`Player.is_immune_to_own_blast`) — only inside that bomb's blast, and only their own: a chain reaction into somebody else's bomb still kills | Every bomb explodes in a diamond and punches through crates |
+| Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, skating: unbroken straight-line running charges speed up to 1.6x over 0.8s, and kicking: walking into a bomb sends it **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide | **Dig in**: sit down in a defensive stance — the character crouches and a shield appears on them. While dug in they can't walk, kick or place bombs; the next hit that would have hurt them — a blast, a saw, fire — does nothing (no damage, no shield spent, no red flash) and just throws them out of the stance: they stand up and the shield swells and fades, with a second of invulnerability that isn't drawn. Pressing the button again leaves it too. Either way the ability is on a **2s cooldown** (`Player.DEFENSE_COOLDOWN`), shown as the red dial behind the character, like the Grenadier's |
 | Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two |
 | Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its blast reaches — the full radius of an ordinary bomb of yours — and it goes off 0.2s after being tripped. An ordinary bomb **can be placed on top of a mine** (so a Miner boxed in by their own field can still blast out) — the mine then goes off together with that bomb |
-| Grenadier (Гранатомётчик) | +1 shield, **two charges** (spent on shells or on ordinary bombs — one pool; +1 per bomb powerup), **the ability button drops an ordinary bomb**, a long cooldown that **shrinks with every shell collected** | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells (the blast is cut short only on the side facing you), **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
+| Grenadier (Гранатомётчик) | +1 shield, **two charges** (spent on shells or on ordinary bombs — one pool; +1 per bomb powerup), **the bomb button drops an ordinary bomb, as for everyone**, a long cooldown that **shrinks with every shell collected** | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. On the **ability** button (E / X): **tap** it for 2 cells (the blast is cut short only on the side facing you), **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
 
 The Sapper's mines stay live until triggered — by the ability button, or by chain-detonating in
 someone else's blast — with no timeout of their own, so `bomb_count_current` doesn't refill until
@@ -171,13 +171,13 @@ The Engineer was the worst off — no passive at all, and a single minute-long w
 biggest share of that: a starting bomb, a wall budget tied to their bomb count, and a wall lifetime
 short enough that more walls doesn't mean a permanently redrawn map.
 
-The Grenadier is the only ranged attack in the game. The launcher lives on the *bomb* button, and the
-*ability* button puts an **ordinary bomb** on the floor, at the full radius of one of theirs. Shells
-and bombs come out of **one pool of charges** — each costs one and comes back when it goes off — so
-every bomb on the floor is a shell they can't throw. (The ability button threw shells as well for a
-while. Two buttons doing one thing invites holding one and tapping the other, which cancels your own
-charge; a different action on each keeps that from happening.) Everything about the shot is built to
-keep it from being artillery.
+The Grenadier is the only ranged attack in the game. The *bomb* button (Space / A) puts an **ordinary
+bomb** on the floor, exactly as for every other character, at the full radius of one of theirs; the
+launcher is the character-specific action, on the *ability* button (E / X), where everyone else's is.
+Shells and bombs come out of **one pool of charges** — each costs one and comes back when it goes off
+— so every bomb on the floor is a shell they can't throw. (The launcher has been on both buttons at
+various points. It lives on the ability button so that Space means the same thing for everyone.)
+Everything about the shot is built to keep it from being artillery.
 
 How far it goes is the one thing the player controls, and it is set by how long the button is held
 rather than by aiming:
@@ -202,7 +202,7 @@ rather than by aiming:
   diagonal shot reaches further in a straight line than a cardinal one, which is the price of the
   angle. A diagonal shot needs no trimmed back arm: the blast is a cross, and a thrower diagonally
   behind the landing cell is on none of its arms. Releasing the direction keys a hair before the
-  bomb button is how people let go, so a diagonal held in the last `DIAGONAL_GRACE` (0.15s) still
+  ability button is how people let go, so a diagonal held in the last `DIAGONAL_GRACE` (0.15s) still
   counts. The sprite keeps facing the nearest straight direction; only the shot is angled. Bots
   don't aim diagonally.
 - While held, `Player._draw_shot_preview` lights the cell the shell would come down on, the cells its
@@ -526,6 +526,35 @@ explodes when caught in someone else's blast, is designed but not built — see
   used to walk each player's `live_bombs` instead — fine for the Grenadier's own shots, but a
   Turret's shell has `owner_player == null` and would never appear in anyone's `live_bombs`, so a bot
   would be the only thing on the arena that couldn't see it coming.
+- Bots **re-pick their character** the way people do: after a bot dies, or wins a round, its HUD
+  corner shows the same arrows (no key hint — a bot has no keys), and after a short pause
+  (`PlayerHudCorner.BOT_PICK_DELAY_MIN`/`MAX`) the portrait flicks to a randomly chosen character, one
+  press every `BOT_PICK_STEP` (0.18s), the short way round the roster, through the same
+  `_change_character` a person's arrow press uses. The choice is written to its `player_slots` entry
+  for the next round, so a round that reloads mid-flick keeps whichever character it had reached.
+- **Joining a match in progress** (`scripts/LateJoin.gd`, a child of `Main`). Any device that is not
+  playing — a pad, or the keyboard — can sit down, in three steps: **press any button** (Esc excepted),
+  which does not join yet but lights up the seats that can be taken; **pick a seat** with left/right
+  or up/down (D-pad, or A/D/W/S) — a seat is a bot's, or the first free slot — and the one you are on
+  is framed in yellow on the HUD with "A — play here" (Space on the keyboard); then **confirm with A /
+  Space**. B / Esc backs out, as does eight idle seconds. Two presses so that a pad picked up off the
+  sofa or a stray key can't put a character into somebody's game, and a choice because *which* bot you
+  replace is the point of joining mid-fight. Several devices can be choosing at once; the first to
+  confirm a seat gets it. A free slot spawns a new player at its corner's spawn cell (or the nearest
+  open one) with a second of invulnerability and a random character; a bot's seat is taken over in
+  place, and a dead one hands the newcomer the re-pick arrows. Nothing happens if there is no seat.
+  Every seat that can be taken says **"Нажмите любую кнопку" / "Press any button"** on its HUD panel in
+  a slow pulse (`PlayerHudCorner`): a bot's panel carries it under its numbers, and the first free slot
+  gets an empty placeholder panel — which reserves its corner of the screen, so the arena is fitted
+  around it. Joining is off while paused, over a results screen or the match-over menu, and once the
+  round has ended; a device that is playing is never a joiner, and a device that is not playing cannot
+  open the pause menu. All keyboards look like one device to the game, so the keyboard joins as one
+  player however many are plugged in.
+- **A pad that disconnects mid-match is replaced by a bot** on the spot (`GameManager`), and the person
+  can take the seat back by joining again like anybody else. (It used to leave the character standing
+  there until the pad came back and claimed it.) A match with **only bots left** in it ends after
+  `Main.NO_HUMANS_GRACE` (5s), with the count shown, and drops back to the Lobby — unless somebody joins
+  in the meantime.
 - Bots are a `player_slots` entry with `device = Consts.DEVICE_BOT`, added from the Lobby (B key) —
   no separate bot scene/node type. In `Player.gd`, `is_bot` (set from `device_id` in `_ready`)
   swaps `_poll_move_dir()`/`_input()` for `_bot_think()`, run on a `BOT_DECISION_INTERVAL` timer

@@ -2,7 +2,9 @@ extends Node
 ## Autoloaded as `GameManager`. Tracks round/match state and scores across scene reloads.
 
 signal round_ended(winner_id: int)
+## A pad dropped out mid-match and a bot has taken the slot over.
 signal player_disconnected(player_id: int)
+## A person has taken a slot over from a bot (see LateJoin), and now drives it.
 signal player_reconnected(player_id: int, device: int)
 
 # How many rounds a match runs for. Captured from Consts.rounds_per_match()
@@ -20,16 +22,11 @@ var scores: Dictionary = {}
 var round_number: int = 0
 var round_over: bool = false # guards against round_ended firing twice (see player_died)
 
-# LIFO: a controller reconnecting reclaims the most recently dropped player
-# first (drop P1 then P2 -> next controller to press gets P2, the one after gets P1).
-var orphaned_player_stack: Array[int] = []
-
 func _ready() -> void:
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
 
 func set_player_slots(slots: Array[Dictionary]) -> void:
 	player_slots = slots
-	orphaned_player_stack.clear()
 
 func set_character_id(player_id: int, character_id: int) -> void:
 	for slot in player_slots:
@@ -37,45 +34,43 @@ func set_character_id(player_id: int, character_id: int) -> void:
 			slot["character_id"] = character_id
 			return
 
+## A pad that drops out mid-match does not leave its character standing there: a bot
+## plays the slot from that moment on, and the person can take it back by joining again
+## (see LateJoin) — on any button, the same way anybody else joins.
 func _on_joy_connection_changed(device: int, connected: bool) -> void:
 	if connected:
 		return
 	for slot in player_slots:
 		if slot["device"] == device:
-			slot["device"] = Consts.DEVICE_NONE
-			if not orphaned_player_stack.has(slot["id"]):
-				orphaned_player_stack.append(slot["id"])
+			slot["device"] = Consts.DEVICE_BOT
 			player_disconnected.emit(slot["id"])
 			return
 
-# Any controller press claims the most recently orphaned player's slot, and
-# control resumes immediately — the live character picks the new device index
-# up off player_reconnected (Player._on_player_reconnected), so the claim does
-# not have to wait for the next round's respawn. Ignored while that controller
-# is already bound to a live slot, so it never steals input from an active
-# player.
-func _input(event: InputEvent) -> void:
-	if orphaned_player_stack.is_empty():
-		return
-	var device = _reconnect_device_of(event)
-	if device == null:
-		return
+## Whether this input device is already driving a slot in the current match.
+func device_in_match(device: int) -> bool:
 	for slot in player_slots:
 		if slot["device"] == device:
-			return
-	var player_id: int = orphaned_player_stack.pop_back()
-	for slot in player_slots:
-		if slot["id"] == player_id:
-			slot["device"] = device
-			player_reconnected.emit(player_id, device)
-			return
+			return true
+	return false
 
-func _reconnect_device_of(event: InputEvent):
-	if Pad.is_confirm_button(event):
-		return event.device
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
-		return -1
-	return null
+## Whether any slot is driven by a person rather than a bot.
+func has_human() -> bool:
+	for slot in player_slots:
+		if slot["device"] != Consts.DEVICE_BOT:
+			return true
+	return false
+
+## A player who joins after the round has started (see LateJoin): they are alive from
+## now on and on the scoreboard from nothing. Refused once the round is over, since
+## there is no round left for them to be in.
+func join_round(id: int) -> bool:
+	if round_over:
+		return false
+	if not scores.has(id):
+		scores[id] = 0
+	if not alive_players.has(id):
+		alive_players.append(id)
+	return true
 
 func start_round(player_ids: Array[int]) -> void:
 	round_number += 1
@@ -131,4 +126,3 @@ func leave_to_lobby() -> void:
 	alive_players = []
 	scores = {}
 	round_number = 0
-	orphaned_player_stack.clear()

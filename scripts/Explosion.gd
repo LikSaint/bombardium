@@ -5,6 +5,10 @@ extends Node2D
 @onready var max_damage_dist: float = Consts.CELL_SIZE / 2.0
 
 var hit_players := {}
+## Whose bomb this blast came from (null for a turret's shell). Read so a character
+## that is immune to its own bombs — see Player.is_immune_to_own_blast — can walk
+## through the fire it set itself.
+var owner_player: Node = null
 
 func _ready() -> void:
 	await get_tree().create_timer(0.3).timeout
@@ -14,6 +18,8 @@ func _physics_process(_delta: float) -> void:
 	var players = get_tree().get_nodes_in_group("players")
 	for player in players:
 		if not player.alive or hit_players.has(player):
+			continue
+		if player == owner_player and player.is_immune_to_own_blast():
 			continue
 		var dist = position.distance_to(player.position)
 		if dist >= max_damage_dist:

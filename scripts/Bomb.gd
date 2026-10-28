@@ -407,6 +407,7 @@ func _spawn_explosion(target_cell: Vector2i) -> void:
 	arena.break_bridge_at(target_cell)
 	var exp := ExplosionScene.instantiate()
 	exp.position = arena.cell_to_world(target_cell)
+	exp.owner_player = owner_player
 	arena.add_child(exp)
 
 ## A kick carries the bomb `distance` cells, or until something stops it — the
