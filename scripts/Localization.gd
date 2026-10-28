@@ -28,7 +28,7 @@ const STRINGS := {
 		"CHAR_NAME_GRENADIER": "Гранатомётчик",
 
 		"CHAR_DESC_BOMB_MASTER": "Очень длинный фитиль — можно подорвать в любой момент кнопкой (%s)",
-		"CHAR_DESC_SCOUT": "Самый быстрый; двойное нажатие в сторону — перепрыгивает через ящик, бомбу или даже стену",
+		"CHAR_DESC_SCOUT": "Самый быстрый; двойное нажатие в сторону — прыжок через любые препятствия",
 		"CHAR_DESC_ENGINEER": "%s: Поставить стену, через которую проходит только сам. Стен — сколько бомб",
 		"CHAR_DESC_PYRO": "Взрыв бьёт ещё и по диагонали, и продавливает ящики — а с разгоном радиуса и камень",
 		"CHAR_DESC_BOMB_KICKER": "Толкает бомбы движением — свои и чужие — на 2 клетки, +1 за каждый бонус скорости",
@@ -108,7 +108,7 @@ const STRINGS := {
 		"CHAR_NAME_GRENADIER": "Grenadier",
 
 		"CHAR_DESC_BOMB_MASTER": "Very long fuse — set them off whenever you like with the button (%s)",
-		"CHAR_DESC_SCOUT": "Fastest on their feet; double-tap a direction to hop over a crate, a bomb, or even a wall",
+		"CHAR_DESC_SCOUT": "Fastest on their feet; double-tap a direction to hop over any obstacle",
 		"CHAR_DESC_ENGINEER": "%s: Place a wall only they can pass through. One wall per bomb",
 		"CHAR_DESC_PYRO": "Blast throws extra arms on the diagonals and pushes through crates — through stone too, with enough radius",
 		"CHAR_DESC_BOMB_KICKER": "Pushes bombs by walking into them — theirs or anyone's — 2 cells, +1 per speed powerup",
