@@ -62,10 +62,10 @@ const REMOTE_FUSE_DURATION := 8.0
 ## and the trip. See MINE_REVEAL_DURATION.
 ##
 ## Trigger range is not a number of its own: it *is* the blast footprint, walls
-## and crates included (see _blast_cells). A mine on half of a radius-4 bomb
-## covers two cells and so fires at two cells — the range you can see from the
-## explosion is the range you have to respect, and neither can drift from the
-## other as radius powerups come in.
+## and crates included (see _blast_cells). A mine is as big as the ordinary bomb
+## of whoever planted it, so a radius-2 mine fires at two cells — the range you
+## can see from the explosion is the range you have to respect, and neither can
+## drift from the other as radius powerups come in.
 ##
 ## MINE_ARM_DELAY keeps a freshly planted mine from going off in the face of an
 ## opponent already standing there.
@@ -73,16 +73,17 @@ const REMOTE_FUSE_DURATION := 8.0
 ## MINE_TRIP_DELAY is the tell between tripping a mine and wearing it. The scale
 ## to read it against is distance travelled, not seconds: base move_duration is
 ## 0.3s per cell, and clearing a radius-1 mine means getting two cells from its
-## centre. So this buys a little under one cell — walking into a mine is meant
-## to be something you pay for, and only somebody already on their way out the
-## far side gets to keep the charge they were carrying.
+## centre. So this buys about half a cell — walking into a mine is meant to be
+## something you pay for, and only somebody already at the far edge of the
+## footprint gets to keep the charge they were carrying.
 ##
 ## It has been as high as 0.45 (a cell and a half), which let anyone who clipped
-## the edge of the footprint stroll clear and made mines read as a suggestion.
-## If they now feel unfair rather than punishing, this is the single number to
-## move; the strobe below re-times itself to whatever it is set to.
+## the edge of the footprint stroll clear and made mines read as a suggestion, and
+## 0.25 after that, before mines were made faster still. If they now feel unfair
+## rather than punishing, this is the single number to move; the strobe below
+## re-times itself to whatever it is set to.
 const MINE_ARM_DELAY := 0.6
-const MINE_TRIP_DELAY := 0.25
+const MINE_TRIP_DELAY := 0.15
 
 ## How long a freshly planted mine stays on show before sinking out of sight for
 ## good. A mine nobody can see is the trap the character is named for; a mine
@@ -103,31 +104,34 @@ const MINE_FADE_DURATION := 0.2 # tail of that window: it sinks into the floor r
 ## The time of flight is the entire counterplay to a ranged blast that needs no
 ## fuse: the shell is visible the whole way, its landing cell is ringed from the
 ## moment it leaves the tube, and at base move speed (0.3s per cell) even the
-## shortest shot is three and a half cells of walking — the floor is deliberately
-## generous, because a shell lobbed over the crate you are hiding behind lands
-## with the least warning of any of them and is the one that has to be escapable. So a shell aimed where somebody *is*
-## misses, and one aimed where they are going does not — which is the skill the
-## character is asking for. Shortening this is the fastest way to make the
-## Grenadier unfair, since nothing else about the shot can be dodged: the floor
-## started at 0.45, which read as a shot you had to have already been running
-## from before it was fired.
+## shortest shot is three cells of walking — the floor is deliberately generous,
+## because a shell lobbed over the crate you are hiding behind lands with the
+## least warning of any of them and is the one that has to be escapable. So a
+## shell aimed where somebody *is* misses, and one aimed where they are going
+## does not — which is the skill the character is asking for. Shortening this is
+## the fastest way to make the Grenadier unfair, since nothing else about the
+## shot can be dodged: the floor started at 0.45, which read as a shot you had to
+## have already been running from before it was fired, and was brought back up to
+## 1.1 — and then down to 0.9 once the launcher became a shot that is hard to
+## land rather than a shot that is hard to survive.
 ##
 ## It is priced by the cell, with a floor, rather than being one flat number: a
 ## charged shot travels further, so it hangs in the air longer and is that much
 ## easier to walk out from under. Without that the long shot would be strictly
 ## better than the short one — same warning, more reach — and there would be no
-## reason ever to tap the button. It also feeds the cooldown, which is measured
-## from impact (see Player.GRENADE_COOLDOWN), so shooting across the arena costs
-## more time than lobbing one over the crate in front of you.
+## reason ever to tap the button. It also decides how long the shell holds its
+## charge before handing it back (see Player._on_owned_bomb_exploded), so shooting
+## across the arena ties a shell up for longer than lobbing one over the crate in
+## front of you.
 ##
 ## The arc is why it clears walls. Height is drawn, not simulated — nothing in
 ## this game has a z axis — but it is what tells you a shell is passing over the
 ## crate rather than into it, and a longer throw visibly goes higher. The base
-## height carries the short shot: at the floor above it hangs for over a second,
+## height carries the short shot: at the floor above it hangs for most of a second,
 ## and a flat little hop that took that long would read as the game lagging
 ## rather than as a mortar shell going up and coming down.
-const FLIGHT_MIN_DURATION := 1.1
-const FLIGHT_PER_CELL := 0.22
+const FLIGHT_MIN_DURATION := 0.9
+const FLIGHT_PER_CELL := 0.18
 const FLIGHT_ARC_HEIGHT := 52.0
 const FLIGHT_ARC_PER_CELL := 5.0
 const FLIGHT_SPIN := 9.0 # radians/s; a tumbling shell reads as thrown rather than slid

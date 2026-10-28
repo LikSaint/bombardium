@@ -20,13 +20,13 @@ and other state as plain text, since icons alone weren't discoverable enough:
   press again to toggle ready, which also prints "ГОТОВ" on the slot (not just the checkmark).
 - **Cycle character**: A/D (keyboard) or D-pad / left stick left-right (gamepad), only while not ready. Each
   joined slot shows a one-line blurb of that character's passive/ability underneath the portrait.
-- **Map size**: keyboard only, Up/Down — 5 bar-height presets, Крошечная (9x7) to Огромная (21x17).
+- **Map size** (Settings screen, before the Room): ◄► on the selected row — 5 bar-height presets, Крошечная (9x7) to Огромная (21x17). Settings is driven by ▲▼/◄► on the keyboard *or* the D-pad / left stick, so a gamepad can reach every option.
 - **Map**: which terrain the arena is carved into — Classic, Bridges, Crater, Quarters, Plaza, or
   Random (the default, re-rolled every round). See [Maps](#maps).
-- **Add/remove bot**: keyboard only, B fills the next open slot with an AI-controlled bot (a random
-  character, instantly ready — shown with an "ИИ" badge instead of the ready checkmark); N removes
-  the most recently added bot. Bots play with the same character/rules as anyone else, just slower
-  to react than a human would be (see Architecture notes).
+- **Bots**: the Settings screen's Bots row (◄► on gamepad or keyboard) fills open slots with AI-controlled
+  bots (a random character, instantly ready — shown with an "ИИ" badge instead of the ready checkmark).
+  Bots play with the same character/rules as anyone else, just slower to react than a human would be
+  (see Architecture notes).
 - A hotkey legend for all of the above sits fixed at the bottom of the Lobby screen.
 - Match starts automatically once at least one device has joined and everyone is ready. Starting
   solo (exactly 1 slot, no one else) auto-fills a bot into the 2nd slot — a lone player can never
@@ -126,7 +126,7 @@ In-match:
 - [x] 4. Character roster + abilities — Bomb-Master, Parkour Runner, Engineer, Pyro, Bomb-Kicker, Magnetto, Miner, Grenadier (8 characters; brief listed 4, the rest added per later requests)
 - [~] 5. Powerups — bomb count/radius/speed/shield drop from blocks and sit on the ground until collected (bobbing icon, never destroyed by blasts); extra weapon *pickups* (mine/remote/fire bomb) not yet built. Some crates drop something dangerous instead — see [Hazards from crates](#hazards-from-crates).
 - [~] 6. Art & audio — AI-generated (PixelLab) pixel-art characters with walk animations, HUD/pickup icons, pause menu icons, blocks, walls, explosions, temp wall all done. Procedural sound effects and two music loops are in; no voice/announcer.
-- [x] 7. Sudden death — a round that drags past the round-end timer (default 2 minutes) gets walled in from the outside
+- [x] 7. Sudden death — a round that drags past the round-end timer (default 90 seconds) gets walled in from the outside
 - [x] 8. Map layouts — Classic, Bridges, Crater, Quarters, Plaza; by default every round is on a different one
 
 ## Characters
@@ -139,8 +139,8 @@ In-match:
 | Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs | Every bomb explodes in a diamond and punches through crates |
 | Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, and skating: unbroken straight-line running charges speed up to 1.6x over 0.8s | Kick the bomb in front of you **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide |
 | Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two |
-| Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its (half-radius) blast reaches |
-| Grenadier (Гранатомётчик) | +1 shield, and **no bombs at all** — the launcher replaces them | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells with the blast shrunk to fit, **hold** it to paint in a dial at your feet and walk the shot out to 3 cells (+1 per bomb powerup), the blast growing with the distance — but holding plants you |
+| Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its blast reaches — the full radius of an ordinary bomb of yours — and it goes off 0.15s after being tripped. An ordinary bomb **can be placed on top of a mine** (so a Miner boxed in by their own field can still blast out) — the mine then goes off together with that bomb |
+| Grenadier (Гранатомётчик) | +1 shield, **two shells** (they are its bombs — it has no ordinary ones; +1 shell per bomb powerup), a short 0.3s reload between shots | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells with the blast shrunk to fit, **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
 
 The Sapper's mines stay live until triggered — by the ability button, or by chain-detonating in
 someone else's blast — with no timeout of their own, so `bomb_count_current` doesn't refill until
@@ -187,27 +187,27 @@ rather than by aiming:
   their own upgrades — and charging buys power as well as reach, since the only way to throw your
   whole blast is to throw it properly far.
 - **Holding** paints in a dial at the Grenadier's feet over `Player.GRENADE_CHARGE_TIME` (0.6s) and
-  walks the landing cell out to `GRENADE_CHARGED_RANGE` (3), the fixed range the character shipped
-  with. Holding also **plants them**: they can still turn (the launcher is aimed by facing) but not
-  walk, so a charged shot is taken from where it was started rather than carried into position with
-  the shot already loaded.
-- Every **bomb** powerup adds a cell to that ceiling, because a character with nothing to put on the
-  floor has no other use for one — their charges are shells in the air, and the cooldown means there
-  is never more than one. Reach is therefore what a Grenadier grows, and the only upgrade in the game
-  that grows an ability rather than the body carrying it; the HUD's bomb pip counts reach for them.
-  Speed stays out of it and buys them only what it buys everyone — a character who has to stand still
-  to charge shouldn't be turning legs into artillery range as well.
+  walks the landing cell out to `GRENADE_CHARGED_RANGE` (4) — plus a cell for every **radius**
+  powerup, so reach grows with the blast (`Player._grenade_max_range`). Holding also **plants
+  them**: they can still turn (the launcher is aimed by facing) but not walk, so a charged shot is
+  taken from where it was started rather than carried into position with the shot already loaded.
+- While held, `Player._draw_shot_preview` lights the cell the shell would come down on, the cells its
+  blast would cover, and a dashed line to it — in **cyan**, because orange (the dial, the in-flight
+  ring) means "committed" and this means "where it would go". It reads off the same functions the
+  throw uses, so it can't promise one thing and do another, follows the launcher if you turn while
+  charging, and goes **red** when the shot would be refused (it would catch the thrower).
+- The launcher carries **two shells** (`Player.GRENADE_START_SHELLS`) and every **bomb** powerup adds
+  another, exactly like it does for everyone else. A shell is hard to land, and a second one in the
+  air helps with that where more range alone doesn't. Speed buys them what it buys everyone.
 
-The dial has two states and they can never both be on screen, because a charge is refused while the
-launcher is hot. Charging, it is orange and paints in **clockwise** from twelve o'clock, one slice
-per cell of extra range with a spoke between slices — what it reports is which cell the shell lands
-on, so a smooth sweep would imply a precision the grid hasn't got, and a full circle of colour is
-this Grenadier's longest throw. On cooldown it is red and unwinds **anticlockwise**: the charge
-running backwards, drained to nothing at the moment the launcher is ready again.
+The dial paints in **clockwise** from twelve o'clock, one slice per cell of extra range with a spoke
+between slices — what it reports is which cell the shell lands on, so a smooth sweep would imply a
+precision the grid hasn't got, and a full circle of colour is this Grenadier's longest throw. A full
+charge pulses.
 
-The shell is then in the air for `Bomb.flight_time_for()` — 0.22s per cell, floored at 1.1s — with a
-ring drawn on its landing cell for the whole flight. Even the shortest shot is three and a half
-cells of walking at base speed, which is the entire counterplay: a shell aimed where somebody *is*
+The shell is then in the air for `Bomb.flight_time_for()` — 0.18s per cell, floored at 0.9s — with a
+ring drawn on its landing cell for the whole flight. Even the shortest shot is three cells of
+walking at base speed, which is the entire counterplay: a shell aimed where somebody *is*
 misses, one aimed where they are going does not. The floor is deliberately generous, because a shell
 lobbed over the crate somebody is hiding behind arrives with the least warning of any of them.
 Pricing the rest by distance is what stops the charged shot from being strictly better than the tap:
@@ -219,15 +219,16 @@ the floor — a full-strength blast on a shell you can drop three cells away wit
 would otherwise be the best thing in the game. Between the two rules a shell can never cover the cell
 it was thrown from, and the shot is refused outright in any case where the arena says it would.
 
-A shell still costs a bomb charge and hands it back when it goes off, which keeps it inside the same
-accounting as everyone else's ordnance, but with nothing else drawing on the pool that single base
-charge is never what stands in the way. The **cooldown** is, and it is counted **from impact rather
-than from the throw**: `Player.GRENADE_COOLDOWN` (1.2s) is added to that shot's flight time, so the
-tube is busy for as long as something is in the air and 1.2s after it lands. A tapped shot therefore
-comes round every 2.3s and a long one every 2.5-3s, about the pace of everyone else's bombs; at half
-of that it read as spamming shells rather than picking shots. Measured from the throw instead, any
-cooldown shorter than the flight would put two shells in the air at once, which is a different and
-much less answerable character.
+A shell costs a bomb charge and hands it back when it goes off, which keeps it inside the same
+accounting as everyone else's ordnance — and those charges are what limit how many are in the air.
+`Player.GRENADE_RELOAD` (0.3s) is only the gap between two shots, counted **from the throw rather
+than from the landing**, so a Grenadier holding N shells can put all N in the air one after another
+while the first is still falling, each returning when it lands. (It has been 1.2s on top of the
+flight, then 0.6s, then nothing at all; the long ones got in the way of the one thing the character
+is for, which is putting several shells down around a target, and with none a button held down
+emptied the launcher onto one cell.) The reload also gates starting a charge. Bots pause
+`Player.BOT_GRENADE_GAP` (0.8s) between shots on top of it, so they don't empty the launcher onto one
+cell.
 
 **Nothing stops a shell**, at either end. Crates, water, bombs, people and stone are all flown over,
 and a shell aimed at a wall goes off *on* the wall, its blast spreading out of the impact into
@@ -390,7 +391,7 @@ generated already split. It can of course *become* split mid-round, which is the
 
 ## Sudden death
 
-A round that runs past the **Закрытие раунда / Round end** setting (default 2 minutes) starts closing
+A round that runs past the **Закрытие раунда / Round end** setting (default 90 seconds) starts closing
 in (`scripts/SuddenDeath.gd`, a node on `Main`).
 Permanent walls drop one at a time, clockwise from the top centre of the arena and spiralling
 inward, until the arena is sealed or someone is the last one standing.
@@ -467,7 +468,8 @@ explodes when caught in someone else's blast, is designed but not built — see
 - Grid size is a runtime setting now (`Consts.set_map_size`), chosen in the Lobby — not a fixed
   const. `Consts.CELL_SIZE` (64px) stays fixed; `Main._fit_camera_to_arena()` zooms the camera to
   fit whichever map size was picked inside the current window/viewport size.
-- Window opens maximized (`window/size/mode=2`) with stretch aspect `expand`, so the game fills
+- Window opens maximized (`window/size/mode=2`; fullscreen on Linux via the `window/size/mode.linuxbsd=3`
+  override, which is what the Steam Deck uses) with stretch aspect `expand`, so the game fills
   whatever screen it's on rather than a fixed small box; `default_texture_filter=0` (Nearest) keeps
   the pixel art crisp at any scale.
 - All blocking/collision (walls, blocks, bombs, temp walls) is resolved logically via `Arena`
@@ -513,11 +515,22 @@ explodes when caught in someone else's blast, is designed but not built — see
   bomb's blast) rather than just running, aiming down a lane at an enemy when one lines up. The first
   three run as an alternative to the generic flee the instant the bot is in danger; the Engineer's
   wall check instead runs on the normal wander/bomb decision, since placing one costs it nothing.
+- Every spawn keeps an **L of four open cells** that crates and random walls never fill
+  (`Arena._get_protected_cells`): the spawn, the two cells beside it, and the one two steps along
+  the wall — the long arm of the L runs along the wall, three cells including the spawn. Three was
+  a pocket a starting bomb covers whole (the Pyro's radius-1 star included), so a spawn whose two
+  exits were crated in left nowhere to stand once the bomb went down. The fourth cell is out of
+  reach of a radius-1 blast and two steps from the spawn. It holds on every map size and layout
+  and for every character — it is a property of the map, not of who is standing on it.
 - `Lobby._maybe_start()` auto-appends one bot slot if the match would otherwise start with exactly 1
   player — `GameManager.player_died()` only fires `round_ended` once exactly one player remains
   *after someone else died*, so a true solo match could never end on its own.
-- Export presets (Linux/Steam Deck primary, Windows secondary) aren't configured yet — set these
-  up in-editor under Project > Export.
+- Export: `export_presets.cfg` has a "Linux" preset (x86_64, embedded PCK → one file) — that is the Steam Deck
+  build. Needs the matching export templates installed (Editor > Manage Export Templates). From the
+  repo root:
+  `godot --headless --path . --export-release "Linux" build/Bombardium.x86_64`
+  The Deck presents as an Xbox-style pad, so `Pad.family()` picks the A/B/X/Y glyphs automatically. On a
+  Deck, copy the file over, `chmod +x` it and add it as a non-Steam game. No Windows preset yet.
 
 ## Known simplifications / not yet done
 

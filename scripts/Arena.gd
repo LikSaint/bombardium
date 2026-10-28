@@ -50,6 +50,9 @@ const WALL_PIERCE_COST := 3
 var cells: Dictionary = {} # Vector2i -> CellState
 var blocks_by_cell: Dictionary = {} # Vector2i -> Block node
 var bombs_by_cell: Dictionary = {} # Vector2i -> Bomb node
+## A mine with an ordinary bomb on top of it: bombs_by_cell holds one entry per
+## cell and the bomb takes it, so the mine waits here until the bomb is gone.
+var mines_under_bombs: Dictionary = {} # Vector2i -> Bomb node (a mine)
 var powerups_by_cell: Dictionary = {} # Vector2i -> Powerup node
 var temp_wall_cells: Dictionary = {} # Vector2i -> owner Player node; WALL cells that are a temp wall (not permanent stone), passable only for their owner
 var temp_wall_nodes: Dictionary = {} # Vector2i -> TempWall node; lets an explosion free the node early instead of waiting out its timer
@@ -78,6 +81,7 @@ func generate() -> void:
 	cells.clear()
 	blocks_by_cell.clear()
 	bombs_by_cell.clear()
+	mines_under_bombs.clear()
 	powerups_by_cell.clear()
 	temp_wall_cells.clear()
 	temp_wall_nodes.clear()
@@ -332,12 +336,22 @@ func _all_open_cells_connected() -> bool:
 			queue.append(next)
 	return seen.size() == open_count
 
+## Every spawn keeps four open cells, not three: the spawn itself, the two cells
+## next to it (the other two sides are the arena wall, or a pillar), and the one
+## past the horizontal neighbour. Three was a pocket a starting bomb covers
+## entirely — the cross of a radius-1 bomb, and the Pyro's star on top of it, take
+## in the spawn and both neighbours — so a spawn whose two exits were then filled
+## with crates left nowhere to stand once the bomb went down. The fourth cell is
+## two steps from the spawn along the wall, which is out of reach of that blast, and
+## a round trip of two cells the player can always run.
 func _get_protected_cells() -> Dictionary:
 	var protected: Dictionary = {}
 	for spawn in get_spawn_cells():
 		protected[spawn] = true
 		for dir in Consts.DIRECTIONS:
 			protected[spawn + dir] = true
+		var inward := 1 if spawn.x < Consts.GRID_WIDTH / 2 else -1
+		protected[spawn + Vector2i(inward * 2, 0)] = true
 	return protected
 
 func get_spawn_cells() -> Array:
@@ -763,11 +777,26 @@ func is_walkable_for(cell: Vector2i, player: Node) -> bool:
 			return true
 	return is_walkable(cell)
 
+## An ordinary bomb may be put down on a cell that holds a mine (see
+## Player._place_ordnance) — otherwise a Miner who has seeded the ground they stand
+## on can't drop the bomb that gets them out of a pocket of crates. The index keeps
+## one entry per cell, so the mine steps aside into mines_under_bombs instead of
+## being overwritten and orphaned, and comes back when the bomb leaves the cell.
 func register_bomb(cell: Vector2i, bomb: Node) -> void:
+	var existing = bombs_by_cell.get(cell)
+	if existing != null and existing != bomb and existing.is_mine and not bomb.is_mine:
+		mines_under_bombs[cell] = existing
 	bombs_by_cell[cell] = bomb
 
 func remove_bomb(cell: Vector2i) -> void:
 	bombs_by_cell.erase(cell)
+	var mine = mines_under_bombs.get(cell)
+	if mine == null:
+		return
+	mines_under_bombs.erase(cell)
+	# It may have gone off on its own in the meantime; only a live one comes back.
+	if is_instance_valid(mine) and not mine.has_exploded:
+		bombs_by_cell[cell] = mine
 
 func has_bomb_at(cell: Vector2i) -> bool:
 	return bombs_by_cell.has(cell)

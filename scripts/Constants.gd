@@ -149,7 +149,7 @@ func set_random_indestructible_walls(value: bool) -> void:
 const POWERUP_CHANCE_MIN := 0
 const POWERUP_CHANCE_MAX := 100
 const POWERUP_CHANCE_STEP := 5
-const DEFAULT_POWERUP_CHANCE_PERCENT := 20
+const DEFAULT_POWERUP_CHANCE_PERCENT := 35 # was 20
 var powerup_chance_percent: int = DEFAULT_POWERUP_CHANCE_PERCENT
 
 func set_powerup_chance_percent(value: int) -> void:
@@ -181,9 +181,9 @@ func rounds_per_match() -> int:
 func set_rounds_index(index: int) -> void:
 	rounds_index = clampi(index, 0, ROUNDS_OPTIONS.size() - 1)
 
-const SUDDEN_DEATH_OPTIONS := [60, 120, 180, 300, 480, 720, 1200, 0] # last 0 means "off"
-const SUDDEN_DEATH_LABELS := ["1", "2", "3", "5", "8", "12", "20", "OFF"]
-const DEFAULT_SUDDEN_DEATH_INDEX := 1 # 120 seconds (2 minutes)
+const SUDDEN_DEATH_OPTIONS := [60, 90, 120, 180, 300, 480, 720, 1200, 0] # last 0 means "off"
+const SUDDEN_DEATH_LABELS := ["1", "1.5", "2", "3", "5", "8", "12", "20", "OFF"]
+const DEFAULT_SUDDEN_DEATH_INDEX := 1 # 90 seconds (a minute and a half); was 2 minutes
 var sudden_death_index: int = DEFAULT_SUDDEN_DEATH_INDEX
 
 func sudden_death_timer() -> float:
@@ -407,9 +407,10 @@ func get_character_stats(character_id: int) -> Dictionary:
 			stats["bombs"] = 2
 			stats["shield"] = 1
 		7:  # Grenadier
-			# One charge and no way to spend it on the floor — the launcher is
-			# this character's bombs (Player._can_place_bombs), and bomb pickups
-			# buy it reach rather than a second shell.
+			# Two shells and no way to spend either on the floor — the launcher is
+			# this character's bombs (Player._can_place_bombs). Matches
+			# Player.GRENADE_START_SHELLS.
+			stats["bombs"] = 2
 			stats["shield"] = 1
 	return stats
 
