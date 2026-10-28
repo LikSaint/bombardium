@@ -160,6 +160,13 @@ const BOT_MINE_MEMORY_MAX := 10.0
 #
 # Reach grows the way the blast does: the ceiling is GRENADE_CHARGED_RANGE plus one
 # cell for every radius powerup, so a bigger blast is also thrown further.
+#
+# The launcher can be pointed along a diagonal: hold two directions at once (up and
+# right, say) while the shot is charging and it goes that way (_grenade_aim_dir).
+# Range is counted in steps along the line, so a diagonal throw of n goes n cells
+# across and n cells down — further in a straight line than the cardinal one, which
+# is the price of the angle. A diagonal shot needs no trimmed back arm: the blast is
+# a cross, and a thrower diagonally behind the landing cell is on none of its arms.
 const GRENADE_MIN_RANGE := 2
 const GRENADE_CHARGED_RANGE := 4
 const GRENADE_START_SHELLS := 2
@@ -252,6 +259,19 @@ var _charge_time: float = -1.0
 ## The countdown behind ability_on_cooldown, kept so the Grenadier's dial can draw how
 ## much of it is left. Not the authority on anything — the flag is.
 var _ability_timer: SceneTreeTimer = null
+## Where the next shell is aimed, handed to _throw_grenade out of band like the range
+## below: a diagonal is a direction the character's sprite doesn't face, so it can't
+## ride on facing_dir. ZERO = use the way the Grenadier is facing.
+var _grenade_throw_dir: Vector2i = Vector2i.ZERO
+## The last diagonal that was held while charging, and when: releasing two direction
+## keys a hair before the bomb button is the normal way to let go, and it must not
+## turn a diagonal shot into a straight one at the last frame.
+var _charge_diagonal: Vector2i = Vector2i.ZERO
+var _charge_diagonal_at: float = -10.0
+const DIAGONAL_GRACE := 0.15
+## How balanced a stick has to be, as the smaller axis over the larger, to count as a
+## diagonal rather than a straight direction with a slight lean (tan 22.5 degrees).
+const DIAGONAL_STICK_RATIO := 0.41
 ## Cells the next shell is thrown, handed to _throw_grenade out of band: the
 ## bookkeeping in use_ability() is shared by every character, so the one
 ## parameter this shot has can't be an argument to it.
@@ -375,10 +395,11 @@ func _apply_character_passives() -> void:
 			powerup_weights = [3, 1, 1, 1]
 			shield_charges += 1
 		CharacterId.GRENADIER:
-			# No legs and no bombs: the launcher replaces them outright (see
-			# _can_place_bombs). The charges are shells in the air, and it carries
-			# GRENADE_START_SHELLS of them — a single shell is too easy to walk away
-			# from. Bomb pickups add more of them, like they do for everyone. The
+			# The launcher is on the bomb button and an ordinary bomb on the ability
+			# button, out of one pool of charges: a shell in the air and a bomb on
+			# the floor each cost one and each comes back when it goes off. The pool
+			# starts at GRENADE_START_SHELLS — a single shell is too easy to walk
+			# away from — and bomb pickups grow it, like they do for everyone. The
 			# shield is the concession to a kit whose whole threat has to be walked
 			# into range to use: at base speed there is no getting back out again.
 			bomb_count_max = GRENADE_START_SHELLS
@@ -445,9 +466,10 @@ func _input(event: InputEvent) -> void:
 				if event.pressed:
 					pickup_weapon()
 
-## The bomb button. The Grenadier has nothing to put on the floor — the launcher
-## replaces their bombs outright (see _can_place_bombs) — so for them this is the
-## throw. Everyone else drops a bomb on the press and ignores the release.
+## The bomb button. For the Grenadier this is the launcher — press to start a charge,
+## release to throw (the bomb they can put on the floor is on the ability button,
+## see _ability_input). Everyone else drops a bomb on the press and ignores the
+## release.
 func _primary_input(pressed: bool) -> void:
 	if character_id == CharacterId.GRENADIER:
 		_charge_input(pressed)
@@ -455,13 +477,15 @@ func _primary_input(pressed: bool) -> void:
 	if pressed:
 		place_bomb()
 
-## The ability button. The Grenadier has nothing on it: their launcher is a
-## replacement for bombs, not an ability alongside them, so it lives on the bomb
-## button alone (_primary_input) and this one is deliberately dead for them —
-## two buttons doing the same thing invites holding one and tapping the other,
-## which is a charge cancelled by the player's own hands.
+## The ability button. For the Grenadier it is the ordinary bomb: the launcher takes
+## the bomb button (_primary_input), and the two used to be one thing on two buttons,
+## which invited holding one and tapping the other and cancelling your own charge. A
+## different action on each keeps that from happening. Everyone else uses their
+## ability.
 func _ability_input(pressed: bool) -> void:
 	if character_id == CharacterId.GRENADIER:
+		if pressed:
+			place_bomb()
 		return
 	if pressed:
 		use_ability()
@@ -763,7 +787,7 @@ func _bot_think() -> void:
 	# where this bot is facing, and the shot wins for exactly one frame.
 	if character_id == CharacterId.GRENADIER:
 		_bot_try_grenade()
-	if _can_place_bombs() and bomb_count_current > 0 and not arena.has_bomb_at(current_cell) \
+	if bomb_count_current > 0 and not arena.has_bomb_at(current_cell) \
 			and _bot_should_bomb(danger, hazard):
 		place_bomb()
 		is_fleeing = true
@@ -1572,14 +1596,6 @@ func _scripted_move_to(target_pos: Vector2, duration: float) -> void:
 		$Portrait.set_walking(false)
 	)
 
-## Whether this character puts bombs on the floor at all. The Grenadier does
-## not: the launcher is what replaces them, and their charges are shells in the
-## air rather than bombs they are carrying. A BOMB_COUNT curse doesn't live
-## here any more — it caps how much of bomb_count_current is spendable (see
-## _effective_bomb_count_current), not whether placing one is allowed at all.
-func _can_place_bombs() -> bool:
-	return character_id != CharacterId.GRENADIER
-
 ## bomb_count_current, capped at this character's own starting bomb capacity
 ## while a BOMB_COUNT curse (see apply_curse) is running. Capped, not zeroed —
 ## a curse landing on someone who hasn't picked up a single bomb powerup yet
@@ -1602,8 +1618,6 @@ func _effective_bomb_radius() -> int:
 	return bomb_radius
 
 func place_bomb() -> void:
-	if not _can_place_bombs():
-		return
 	_place_ordnance(false)
 
 ## Bombs and the Miner's mines come out of one pool, not two, so seeding ground
@@ -1670,18 +1684,20 @@ func _throw_grenade() -> bool:
 	if arena == null or bomb_count_current < 1:
 		return false
 	var from := get_current_cell()
-	var landing := _grenade_landing_cell(facing_dir, maxi(_grenade_throw_range, _grenade_min_range()))
+	var dir := _grenade_throw_dir if _grenade_throw_dir != Vector2i.ZERO else facing_dir
+	_grenade_throw_dir = Vector2i.ZERO
+	var landing := _grenade_landing_cell(dir, maxi(_grenade_throw_range, _grenade_min_range()))
 	if landing == INVALID_CELL:
 		return false
-	var cells: int = absi(landing.x - from.x) + absi(landing.y - from.y)
+	var cells := _grenade_steps(from, landing)
 	# Belt and braces on top of the capped arm: the arena is what decides where a
 	# blast really reaches, and a shot that would still come back to us is not taken.
-	if _grenade_blast_cells(landing, facing_dir, cells).has(from):
+	if _grenade_blast_cells(landing, dir, cells).has(from):
 		return false
 	var bomb := BombScene.instantiate()
 	bomb.thrown = true
 	bomb.radius = _grenade_radius()
-	bomb.capped_dir = -facing_dir
+	bomb.capped_dir = _grenade_back_dir(dir)
 	bomb.capped_radius = cells - 1
 	# Re-read per shot: every shell collected since the last one shortens it (see the
 	# Grenadier section above).
@@ -1722,6 +1738,36 @@ func _charged_range() -> int:
 		return low
 	return low + int(round(_charge_fraction() * (high - low)))
 
+## Which two directions are held at once, as a diagonal, or ZERO when it isn't one.
+## A keyboard needs both keys; a stick or D-pad needs both axes past the deadzone and
+## roughly balanced, so a straight push with a slight lean is still straight.
+func _diagonal_held() -> Vector2i:
+	if _is_disconnected():
+		return Vector2i.ZERO
+	var v := Vector2.ZERO
+	if device_id == -1:
+		v.x = float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A))
+		v.y = float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W))
+	else:
+		v = _joy_vector()
+	var ax := absf(v.x)
+	var ay := absf(v.y)
+	if ax <= MOVE_DEADZONE or ay <= MOVE_DEADZONE:
+		return Vector2i.ZERO
+	if minf(ax, ay) < DIAGONAL_STICK_RATIO * maxf(ax, ay):
+		return Vector2i.ZERO
+	return Vector2i(1 if v.x > 0.0 else -1, 1 if v.y > 0.0 else -1)
+
+## The way the launcher is pointing right now: a diagonal if one is held (or was, a
+## moment ago — see DIAGONAL_GRACE), otherwise the way the Grenadier is facing.
+func _grenade_aim_dir() -> Vector2i:
+	var held := _diagonal_held()
+	if held != Vector2i.ZERO:
+		return held
+	if Time.get_ticks_msec() / 1000.0 - _charge_diagonal_at < DIAGONAL_GRACE:
+		return _charge_diagonal
+	return facing_dir
+
 func _begin_charge() -> void:
 	if _charge_time >= 0.0:
 		return
@@ -1731,12 +1777,15 @@ func _begin_charge() -> void:
 	if ability_on_cooldown or bomb_count_current < 1:
 		return
 	_charge_time = 0.0
+	_charge_diagonal = Vector2i.ZERO
+	_charge_diagonal_at = -10.0
 	queue_redraw()
 
 func _release_charge() -> void:
 	if _charge_time < 0.0:
 		return
 	_grenade_throw_range = _charged_range()
+	_grenade_throw_dir = _grenade_aim_dir()
 	_charge_time = -1.0
 	queue_redraw()
 	use_ability()
@@ -1753,6 +1802,10 @@ func _process(delta: float) -> void:
 			_cancel_charge()
 		else:
 			_charge_time += delta
+			var held := _diagonal_held()
+			if held != Vector2i.ZERO:
+				_charge_diagonal = held
+				_charge_diagonal_at = Time.get_ticks_msec() / 1000.0
 	# The dial stays on screen through the cooldown as well, so the redraw has to
 	# outlast the charge that put it there.
 	if _charge_time >= 0.0 or (character_id == CharacterId.GRENADIER and ability_on_cooldown):
@@ -1802,11 +1855,12 @@ func _draw_shot_preview() -> void:
 	if arena == null:
 		return
 	var from := get_current_cell()
-	var landing := _grenade_landing_cell(facing_dir, _charged_range())
+	var dir := _grenade_aim_dir()
+	var landing := _grenade_landing_cell(dir, _charged_range())
 	if landing == INVALID_CELL:
 		return
-	var cells: int = absi(landing.x - from.x) + absi(landing.y - from.y)
-	var blast = _grenade_blast_cells(landing, facing_dir, cells)
+	var cells := _grenade_steps(from, landing)
+	var blast = _grenade_blast_cells(landing, dir, cells)
 	# The same refusal _throw_grenade makes, shown red instead of left as a shot
 	# that silently does nothing when the button comes up.
 	var colour := GRENADE_PREVIEW_BLOCKED_COLOR if blast.has(from) else GRENADE_PREVIEW_COLOR
@@ -1881,7 +1935,20 @@ func _draw_dial_slice(from_angle: float, sweep: float, colour: Color) -> void:
 ## shot in every direction, including the three that were never in any danger. Only
 ## the arm that could hit the thrower is trimmed now.
 func _grenade_blast_cells(landing: Vector2i, dir: Vector2i, cells: int) -> Dictionary:
-	return arena.blast_cells(landing, _grenade_radius(), false, -dir, cells - 1)
+	return arena.blast_cells(landing, _grenade_radius(), false, _grenade_back_dir(dir), cells - 1)
+
+## The arm of the blast that points back at the thrower, which is the one that gets
+## trimmed. A diagonal throw has none: the thrower sits on a diagonal from the landing
+## cell and a cross blast has no arm along it, so there is nothing to trim.
+func _grenade_back_dir(dir: Vector2i) -> Vector2i:
+	if dir.x != 0 and dir.y != 0:
+		return Vector2i.ZERO
+	return -dir
+
+## How many steps a throw from `from` to `landing` is: along a diagonal that is the
+## number of cells across (and down), not the two of walking it as an L.
+func _grenade_steps(from: Vector2i, landing: Vector2i) -> int:
+	return maxi(absi(landing.x - from.x), absi(landing.y - from.y))
 
 ## How many shells beyond the starting kit this Grenadier has collected.
 func _grenade_extra_shells() -> int:

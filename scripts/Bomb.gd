@@ -73,17 +73,17 @@ const REMOTE_FUSE_DURATION := 8.0
 ## MINE_TRIP_DELAY is the tell between tripping a mine and wearing it. The scale
 ## to read it against is distance travelled, not seconds: base move_duration is
 ## 0.3s per cell, and clearing a radius-1 mine means getting two cells from its
-## centre. So this buys about half a cell — walking into a mine is meant to be
+## centre. So this buys two-thirds of a cell — walking into a mine is meant to be
 ## something you pay for, and only somebody already at the far edge of the
 ## footprint gets to keep the charge they were carrying.
 ##
 ## It has been as high as 0.45 (a cell and a half), which let anyone who clipped
 ## the edge of the footprint stroll clear and made mines read as a suggestion, and
-## 0.25 after that, before mines were made faster still. If they now feel unfair
-## rather than punishing, this is the single number to move; the strobe below
-## re-times itself to whatever it is set to.
+## 0.25 after that, then 0.15, which read as going off the instant they were
+## touched. If they now feel unfair rather than punishing, or too slow, this is the
+## single number to move; the strobe below re-times itself to whatever it is set to.
 const MINE_ARM_DELAY := 0.6
-const MINE_TRIP_DELAY := 0.15
+const MINE_TRIP_DELAY := 0.2
 
 ## How long a freshly planted mine stays on show before sinking out of sight for
 ## good. A mine nobody can see is the trap the character is named for; a mine

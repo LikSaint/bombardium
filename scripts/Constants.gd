@@ -407,9 +407,8 @@ func get_character_stats(character_id: int) -> Dictionary:
 			stats["bombs"] = 2
 			stats["shield"] = 1
 		7:  # Grenadier
-			# Two shells and no way to spend either on the floor — the launcher is
-			# this character's bombs (Player._can_place_bombs). Matches
-			# Player.GRENADE_START_SHELLS.
+			# Two charges, spent on shells from the launcher or on a bomb on the
+			# floor — one pool. Matches Player.GRENADE_START_SHELLS.
 			stats["bombs"] = 2
 			stats["shield"] = 1
 	return stats

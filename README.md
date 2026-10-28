@@ -139,8 +139,8 @@ In-match:
 | Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs | Every bomb explodes in a diamond and punches through crates |
 | Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, and skating: unbroken straight-line running charges speed up to 1.6x over 0.8s | Kick the bomb in front of you **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide |
 | Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two |
-| Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its blast reaches — the full radius of an ordinary bomb of yours — and it goes off 0.15s after being tripped. An ordinary bomb **can be placed on top of a mine** (so a Miner boxed in by their own field can still blast out) — the mine then goes off together with that bomb |
-| Grenadier (Гранатомётчик) | +1 shield, **two shells** (they are its bombs — it has no ordinary ones; +1 shell per bomb powerup), a long cooldown that **shrinks with every shell collected** | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells (the blast is cut short only on the side facing you), **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
+| Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its blast reaches — the full radius of an ordinary bomb of yours — and it goes off 0.2s after being tripped. An ordinary bomb **can be placed on top of a mine** (so a Miner boxed in by their own field can still blast out) — the mine then goes off together with that bomb |
+| Grenadier (Гранатомётчик) | +1 shield, **two charges** (spent on shells or on ordinary bombs — one pool; +1 per bomb powerup), **the ability button drops an ordinary bomb**, a long cooldown that **shrinks with every shell collected** | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells (the blast is cut short only on the side facing you), **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
 
 The Sapper's mines stay live until triggered — by the ability button, or by chain-detonating in
 someone else's blast — with no timeout of their own, so `bomb_count_current` doesn't refill until
@@ -171,11 +171,13 @@ The Engineer was the worst off — no passive at all, and a single minute-long w
 biggest share of that: a starting bomb, a wall budget tied to their bomb count, and a wall lifetime
 short enough that more walls doesn't mean a permanently redrawn map.
 
-The Grenadier is the only ranged attack in the game, and the only character with **no ordinary
-bombs**: the launcher replaces them outright (`Player._can_place_bombs`), so it lives on the *bomb*
-button and the ability button does nothing for them. (It threw as well for a while. Two buttons
-doing one thing invites holding one and tapping the other, which cancels your own charge.)
-Everything about the shot is built to keep it from being artillery.
+The Grenadier is the only ranged attack in the game. The launcher lives on the *bomb* button, and the
+*ability* button puts an **ordinary bomb** on the floor, at the full radius of one of theirs. Shells
+and bombs come out of **one pool of charges** — each costs one and comes back when it goes off — so
+every bomb on the floor is a shell they can't throw. (The ability button threw shells as well for a
+while. Two buttons doing one thing invites holding one and tapping the other, which cancels your own
+charge; a different action on each keeps that from happening.) Everything about the shot is built to
+keep it from being artillery.
 
 How far it goes is the one thing the player controls, and it is set by how long the button is held
 rather than by aiming:
@@ -192,6 +194,17 @@ rather than by aiming:
   powerup, so reach grows with the blast (`Player._grenade_max_range`). Holding also **plants
   them**: they can still turn (the launcher is aimed by facing) but not walk, so a charged shot is
   taken from where it was started rather than carried into position with the shot already loaded.
+- **Diagonals.** Hold two directions at once (up and right, say) while the shot is charging and the
+  launcher swings onto that diagonal (`Player._grenade_aim_dir`): the preview, and the throw, go
+  that way. A keyboard needs both keys; a stick or D-pad needs both axes past the deadzone and
+  roughly balanced (`DIAGONAL_STICK_RATIO`), so a straight push with a slight lean stays straight.
+  Range is counted in steps along the line — a diagonal throw of 4 goes 4 across and 4 down — so a
+  diagonal shot reaches further in a straight line than a cardinal one, which is the price of the
+  angle. A diagonal shot needs no trimmed back arm: the blast is a cross, and a thrower diagonally
+  behind the landing cell is on none of its arms. Releasing the direction keys a hair before the
+  bomb button is how people let go, so a diagonal held in the last `DIAGONAL_GRACE` (0.15s) still
+  counts. The sprite keeps facing the nearest straight direction; only the shot is angled. Bots
+  don't aim diagonally.
 - While held, `Player._draw_shot_preview` lights the cell the shell would come down on, the cells its
   blast would cover, and a dashed line to it — in **cyan**, because orange (the dial, the in-flight
   ring) means "committed" and this means "where it would go". It reads off the same functions the
