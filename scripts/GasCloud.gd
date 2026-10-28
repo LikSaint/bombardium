@@ -1,8 +1,18 @@
 extends Node2D
-## Crate hazard: a poison cloud that doesn't chase and doesn't block movement —
-## it just makes a patch of the arena unsafe to linger in for a while. The one
+## Crate hazard: a patch of fire that doesn't chase and doesn't block movement —
+## it just makes a stretch of the arena unsafe to stand in for a while. The one
 ## hazard that reads as a zone to route around rather than a point to dodge or
 ## an object to outrun.
+##
+## (It was a green poison cloud, and nobody could tell what it was: a faint
+## green wash over a green floor. It is orange flames now. The class, the scene
+## and the "gas_clouds" group keep their old names — the arena and the bots find
+## it by those — so only the way it looks and how it is introduced changed.)
+##
+## It does not go live the instant it appears. For WARMUP_DURATION the cells it is
+## about to take are outlined in a pulsing dashed orange and nothing hurts yet, so
+## whoever is standing next to the crate that just broke has a moment to step out
+## of the footprint instead of learning about it by dying in it.
 ##
 ## Not built from Arena.blast_cells — this isn't an explosion, it doesn't stop
 ## dead at the first thing it hits, and it spreads through open ground rather
@@ -18,10 +28,14 @@ var arena: Node2D
 var origin_cell: Vector2i
 
 var _footprint: Dictionary = {}     # Vector2i -> int, BFS distance from origin_cell
+## Seconds since it appeared, *including* the warm-up. Everything that paces the
+## fire itself (growth, lifetime, fade) reads _live_time() instead.
 var _elapsed: float = 0.0
 var _hit_cooldowns: Dictionary = {} # Player node -> float, seconds left before it can hurt that player again
 
 const GAS_MAX_RADIUS := 2
+## Outline-only stretch before it can hurt anyone — see the top of the file.
+const WARMUP_DURATION := 0.6
 const GROWTH_STEP_DURATION := 0.4   # ring by ring; full radius live by 0.8s
 const LIFETIME := 6.0
 const FADE_DURATION := LIFETIME * 0.2 # tail of LIFETIME: fades out rather than vanishing on the last frame
@@ -30,7 +44,11 @@ const FADE_DURATION := LIFETIME * 0.2 # tail of LIFETIME: fades out rather than 
 ## than once.
 const TICK_COOLDOWN := 0.6
 
-const CLOUD_COLOR := Color(0.42, 0.72, 0.32)
+const GLOW_COLOR := Color(1.0, 0.36, 0.04)    # the scorched ground under the flames
+const FLAME_OUTER_COLOR := Color(1.0, 0.42, 0.08)
+const FLAME_INNER_COLOR := Color(1.0, 0.86, 0.3)
+const WARNING_COLOR := Color(1.0, 0.5, 0.12)   # the outline of cells that are about to ignite
+const FLAMES_PER_CELL := 4
 
 func _ready() -> void:
 	add_to_group("gas_clouds")
@@ -63,14 +81,22 @@ func _flood_fill(start: Vector2i) -> Dictionary:
 ## for bot awareness, and by _process below for the actual damage tick.
 func active_cells() -> Dictionary:
 	var out := {}
+	if _elapsed < WARMUP_DURATION:
+		return out
+	var live := _live_time()
 	for c in _footprint:
-		if _elapsed >= _footprint[c] * GROWTH_STEP_DURATION:
+		if live >= _footprint[c] * GROWTH_STEP_DURATION:
 			out[c] = true
 	return out
 
+## Seconds the fire has actually been burning: the clock behind its growth, its
+## lifetime and its fade, which starts once the warm-up is over.
+func _live_time() -> float:
+	return maxf(0.0, _elapsed - WARMUP_DURATION)
+
 func _process(delta: float) -> void:
 	_elapsed += delta
-	if _elapsed >= LIFETIME:
+	if _live_time() >= LIFETIME:
 		queue_free()
 		return
 	for p in _hit_cooldowns.keys():
@@ -85,13 +111,60 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
+	var cs := float(Consts.CELL_SIZE)
+	if _elapsed < WARMUP_DURATION:
+		_draw_warmup(cs)
+		return
+	var live := _live_time()
 	var fade_start := LIFETIME - FADE_DURATION
-	var fade: float = 1.0 if _elapsed <= fade_start else clampf(1.0 - (_elapsed - fade_start) / FADE_DURATION, 0.0, 1.0)
+	var fade: float = 1.0 if live <= fade_start else clampf(1.0 - (live - fade_start) / FADE_DURATION, 0.0, 1.0)
 	if fade <= 0.0:
 		return
-	var pulse := 0.8 + 0.2 * sin(Time.get_ticks_msec() / 1000.0 * TAU * 0.6)
-	var cs := float(Consts.CELL_SIZE)
+	var pulse := 0.85 + 0.15 * sin(Time.get_ticks_msec() / 1000.0 * TAU * 1.4)
 	for c in active_cells():
 		var at: Vector2 = Vector2(c - origin_cell) * cs
-		var rect := Rect2(at - Vector2(cs, cs) / 2.0, Vector2(cs, cs))
-		draw_rect(rect, Color(CLOUD_COLOR, 0.28 * fade * pulse), true)
+		_draw_burning_cell(c, at, cs, fade, pulse)
+
+## Not yet burning: each cell of the footprint is outlined, pulsing faster as the
+## fire comes up, so the shape it is about to take is on the ground before it is
+## lethal.
+func _draw_warmup(cs: float) -> void:
+	var progress := _elapsed / WARMUP_DURATION
+	var pulse := 0.5 + 0.5 * sin(_elapsed * TAU * (2.0 + 4.0 * progress))
+	for c in _footprint:
+		var at: Vector2 = Vector2(c - origin_cell) * cs
+		var rect := Rect2(at - Vector2(cs, cs) / 2.0, Vector2(cs, cs)).grow(-3.0)
+		draw_rect(rect, Color(GLOW_COLOR, 0.10 + 0.12 * pulse), true)
+		draw_rect(rect, Color(WARNING_COLOR, 0.55 + 0.4 * pulse), false, 2.5)
+
+## One cell on fire: a warm glow on the floor and a few flame tongues licking up
+## out of it. Each tongue has its own phase, derived from where it is rather than
+## rolled, so the flicker is stable from frame to frame and differs from cell to
+## cell without the fire needing any state of its own.
+func _draw_burning_cell(c: Vector2i, at: Vector2, cs: float, fade: float, pulse: float) -> void:
+	var rect := Rect2(at - Vector2(cs, cs) / 2.0, Vector2(cs, cs))
+	draw_rect(rect, Color(GLOW_COLOR, 0.46 * fade * pulse), true)
+	var t := Time.get_ticks_msec() / 1000.0
+	for i in FLAMES_PER_CELL:
+		var seed := float((c.x * 7 + c.y * 13 + i * 5) % 11) / 11.0 * TAU
+		var x := (float(i) - (FLAMES_PER_CELL - 1) / 2.0) * cs * 0.23 + sin(seed) * cs * 0.04
+		var base := at + Vector2(x, cs * 0.34)
+		var height := cs * (0.62 + 0.16 * sin(t * 9.0 + seed)) * fade
+		var sway := sin(t * 5.0 + seed * 1.7) * cs * 0.05
+		_draw_flame(base, cs * 0.25, height, sway, Color(FLAME_OUTER_COLOR, 0.92 * fade))
+		_draw_flame(base, cs * 0.13, height * 0.62, sway * 0.6, Color(FLAME_INNER_COLOR, 0.95 * fade))
+
+## A single flame tongue: a teardrop that is widest near the bottom and comes to a
+## point at the top, leaning by `sway`.
+func _draw_flame(base: Vector2, width: float, height: float, sway: float, colour: Color) -> void:
+	var half := width / 2.0
+	var pts := PackedVector2Array([
+		base + Vector2(-half, 0.0),
+		base + Vector2(-half * 0.95, -height * 0.35),
+		base + Vector2(-half * 0.45 + sway * 0.5, -height * 0.75),
+		base + Vector2(sway, -height),
+		base + Vector2(half * 0.45 + sway * 0.5, -height * 0.75),
+		base + Vector2(half * 0.95, -height * 0.35),
+		base + Vector2(half, 0.0),
+	])
+	draw_colored_polygon(pts, colour)

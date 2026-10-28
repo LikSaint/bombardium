@@ -134,10 +134,11 @@ const BOT_MINE_MEMORY_MAX := 10.0
 # How far a shell goes is the one thing the player controls, and it is decided
 # by how long the bomb button is held rather than by aiming:
 #
-#   * A tap throws two cells (GRENADE_MIN_RANGE) and shrinks that shell's blast
-#     to whatever fits in the gap (_grenade_shot_radius), so it is always safe to
-#     take at any radius. Charging therefore buys power as well as reach: the
-#     only way to throw your whole blast is to throw it properly far.
+#   * A tap throws two cells (GRENADE_MIN_RANGE). The blast is the launcher's full
+#     radius on three sides; only the arm pointing back at the thrower is cut, to
+#     stop one cell short of them (_grenade_blast_cells). So a close shot is always
+#     safe to take, and it is not a weaker shot where it matters — only the side
+#     nobody wants it on is trimmed.
 #   * Holding fills a ring at the Grenadier's feet over GRENADE_CHARGE_TIME and
 #     walks the landing cell out to GRENADE_CHARGED_RANGE — far enough to throw
 #     over the wall you are standing behind and short enough that they still have
@@ -148,21 +149,26 @@ const BOT_MINE_MEMORY_MAX := 10.0
 # A shell is hard to land — it is in the air for most of a second and the target
 # walks — so the launcher carries more than one: it starts with GRENADE_START_SHELLS
 # charges and every bomb powerup adds another, exactly as it does for everyone
-# else. The charges are what limit how many shells are out; GRENADE_RELOAD is only a
-# short gap between two shots, counted from the throw rather than from the landing,
-# so a Grenadier holding N shells can still put all N in the air one after another
-# while the first is falling, and gets each one back when it lands.
+# else.
 #
-# Reach grows the way the blast does. The ceiling is GRENADE_CHARGED_RANGE plus one
-# cell for every radius powerup, so a bigger blast is also thrown further — which
-# also keeps the self-safety rule (_grenade_shot_radius) from squeezing a big blast
-# into a short throw.
+# The cooldown is what makes that a progression. It is a table indexed by how many
+# shells beyond the starting two the Grenadier has collected (GRENADE_COOLDOWNS):
+# 1.6s at the starting kit, 1.0s with one extra, 0.6s with two, and so on down to
+# 0.15s, counted from the throw. A Grenadier with the starting kit lobs one shell
+# and waits for it; one with a handful can put several in the air at nearly the pace
+# they can press the button, which is the whole point of collecting them.
+#
+# Reach grows the way the blast does: the ceiling is GRENADE_CHARGED_RANGE plus one
+# cell for every radius powerup, so a bigger blast is also thrown further.
 const GRENADE_MIN_RANGE := 2
 const GRENADE_CHARGED_RANGE := 4
 const GRENADE_START_SHELLS := 2
 const GRENADE_CHARGE_TIME := 0.6
-## Seconds between two shots. Deliberately small — see the Grenadier section above.
-const GRENADE_RELOAD := 0.3
+## Cooldown after a throw, in seconds, by how many shells beyond GRENADE_START_SHELLS
+## have been collected; past the end of the list the last entry stays. The first
+## three are the tuned values (1.6, 1.0, 0.6); the rest carry on at about the same
+## rate down to the floor.
+const GRENADE_COOLDOWNS: Array[float] = [1.6, 1.0, 0.6, 0.4, 0.25, 0.15]
 ## Colour of the landing-cell preview while charging. Deliberately not the orange
 ## of the charge dial or of the in-flight marker (Bomb.FLIGHT_MARKER_COLOR): those
 ## mean "this is committed", this means "this is where it would go".
@@ -174,10 +180,10 @@ const GRENADE_PREVIEW_BLOCKED_COLOR := Color(1.0, 0.25, 0.25)
 ## somebody would read as being sniped by the scenery — bots take the shot they
 ## walked up to, and leave the long ones to people.
 const BOT_GRENADE_MAX_RANGE := 5
-## The reload is too short to space a bot's shots out, so left alone it would see
+## With a handful of shells the cooldown gets short enough that a bot would see
 ## someone in range and put every shell it has onto that one cell in a few frames.
-## This is the pause it takes between shots instead — about how long a person needs
-## to see where the last one went and decide on the next.
+## This is the pause it takes between shots on top of it — about how long a person
+## needs to see where the last one went and decide on the next.
 const BOT_GRENADE_GAP := 0.8
 var _bot_grenade_ready_at: float = 0.0
 const BOT_GRENADE_MIN_BLOCKS := 2
@@ -243,6 +249,9 @@ var ability_on_cooldown: bool = false
 ## Doubles as "is a shot being aimed right now", which is what the ring at the
 ## player's feet is drawn from.
 var _charge_time: float = -1.0
+## The countdown behind ability_on_cooldown, kept so the Grenadier's dial can draw how
+## much of it is left. Not the authority on anything — the flag is.
+var _ability_timer: SceneTreeTimer = null
 ## Cells the next shell is thrown, handed to _throw_grenade out of band: the
 ## bookkeeping in use_ability() is shared by every character, so the one
 ## parameter this shot has can't be an argument to it.
@@ -376,8 +385,8 @@ func _apply_character_passives() -> void:
 			bomb_count_current = bomb_count_max
 			bomb_level += GRENADE_START_SHELLS - 1
 			shield_charges += 1
-			ability_cooldown = GRENADE_RELOAD
-			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — more shells in the air
+			ability_cooldown = _grenade_cooldown()
+			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — more shells, and a shorter cooldown
 	stats_changed.emit()
 
 ## GameManager owns the slot->device bookkeeping, but the live character in the
@@ -805,8 +814,8 @@ func _bot_try_character_escape(danger: Dictionary, hazard: Dictionary) -> bool:
 ## differently from the blast is a bot that takes cover in fire: the old copy of
 ## this let a Pyro's diamond through walls, so bots both feared cover that was
 ## in fact safe and trusted crates that were in fact about to be shot through.
-func _blast_cells_for(cell: Vector2i, radius: int, is_star: bool) -> Dictionary:
-	return arena.blast_cells(cell, radius, is_star)
+func _blast_cells_for(cell: Vector2i, radius: int, is_star: bool, capped_dir: Vector2i = Vector2i.ZERO, capped_radius: int = 0) -> Dictionary:
+	return arena.blast_cells(cell, radius, is_star, capped_dir, capped_radius)
 
 ## Cells inside a live (not yet exploded) bomb's blast footprint. These are
 ## a *future* threat — the multi-second fuse means walking through one while
@@ -820,7 +829,7 @@ func _compute_danger_cells() -> Dictionary:
 		# what lets the bot walk in, stand on it and take the hit.
 		if bomb.is_mine and not _bot_remembers_mine(bomb):
 			continue
-		for c in _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast):
+		for c in _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast, bomb.capped_dir, bomb.capped_radius):
 			danger[c] = true
 	# A shell in the air is not on the grid and so never appears in
 	# bombs_by_cell (see Bomb._ready), but it is drawn overhead with a ring
@@ -848,7 +857,7 @@ func _incoming_shell_cells() -> Dictionary:
 	for bomb in get_tree().get_nodes_in_group("thrown_shells"):
 		if bomb.has_exploded:
 			continue
-		for c in _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast):
+		for c in _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast, bomb.capped_dir, bomb.capped_radius):
 			cells[c] = true
 	return cells
 
@@ -992,7 +1001,7 @@ func _time_until_forced_detonation() -> float:
 		var bomb = arena.bombs_by_cell[bomb_cell]
 		if bomb.is_mine:
 			continue
-		if not _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast).has(current_cell):
+		if not _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast, bomb.capped_dir, bomb.capped_radius).has(current_cell):
 			continue
 		soonest = min(soonest, bomb.get_node("Timer").time_left)
 	return soonest
@@ -1137,7 +1146,7 @@ func _bot_try_detonate() -> void:
 	for bomb in live_bombs:
 		if not is_instance_valid(bomb) or bomb.has_exploded:
 			continue
-		var blast := _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast)
+		var blast := _blast_cells_for(bomb.cell, bomb.radius, bomb.is_star_blast, bomb.capped_dir, bomb.capped_radius)
 		if blast.has(current_cell):
 			self_in_blast = true
 		for c in blast:
@@ -1238,7 +1247,7 @@ func _bot_try_grenade() -> void:
 			var landing := _grenade_landing_cell(dir, cells)
 			if landing == INVALID_CELL:
 				continue
-			var blast := _blast_cells_for(landing, _grenade_shot_radius(cells), false)
+			var blast := _grenade_blast_cells(landing, dir, cells)
 			if blast.has(current_cell):
 				continue
 			var blocks := 0
@@ -1353,7 +1362,7 @@ func _bot_kick_dir(only_at_enemies: bool = false) -> Vector2i:
 		# back at the bot — a bomb shoved down a short lane can end up with
 		# this cell inside its blast all over again.
 		var resting: Vector2i = lane[lane.size() - 1]
-		var resting_blast := _blast_cells_for(resting, bomb.radius, bomb.is_star_blast)
+		var resting_blast := _blast_cells_for(resting, bomb.radius, bomb.is_star_blast, bomb.capped_dir, bomb.capped_radius)
 		if resting_blast.has(current_cell):
 			continue
 		for c in lane:
@@ -1665,14 +1674,18 @@ func _throw_grenade() -> bool:
 	if landing == INVALID_CELL:
 		return false
 	var cells: int = absi(landing.x - from.x) + absi(landing.y - from.y)
-	var radius := _grenade_shot_radius(cells)
-	# Belt and braces on top of that cap: the arena is what decides where a blast
-	# really reaches, and a shot that would still come back to us is not taken.
-	if arena.blast_cells(landing, radius, false).has(from):
+	# Belt and braces on top of the capped arm: the arena is what decides where a
+	# blast really reaches, and a shot that would still come back to us is not taken.
+	if _grenade_blast_cells(landing, facing_dir, cells).has(from):
 		return false
 	var bomb := BombScene.instantiate()
 	bomb.thrown = true
-	bomb.radius = radius
+	bomb.radius = _grenade_radius()
+	bomb.capped_dir = -facing_dir
+	bomb.capped_radius = cells - 1
+	# Re-read per shot: every shell collected since the last one shortens it (see the
+	# Grenadier section above).
+	ability_cooldown = _grenade_cooldown()
 	_commit_ordnance(bomb, landing, position)
 	Sfx.play("bomb_kick", 0.7)
 	return true
@@ -1680,10 +1693,10 @@ func _throw_grenade() -> bool:
 # --- Charging the shot -----------------------------------------------------
 
 ## Nearest cell the launcher throws to. A flat two, rather than "one past your
-## own blast": it is the shell's radius that gives way to keep a short throw safe
-## (see _grenade_shot_radius), so a Grenadier with a big blast still lobs one
-## right in front of themselves instead of being pushed further and further out
-## by their own upgrades.
+## own blast": it is the arm of the blast pointing back at the thrower that gives
+## way to keep a short throw safe (see _grenade_blast_cells), so a Grenadier with a
+## big blast still lobs one right in front of themselves instead of being pushed
+## further and further out by their own upgrades.
 func _grenade_min_range() -> int:
 	return GRENADE_MIN_RANGE
 
@@ -1740,7 +1753,9 @@ func _process(delta: float) -> void:
 			_cancel_charge()
 		else:
 			_charge_time += delta
-	if _charge_time >= 0.0:
+	# The dial stays on screen through the cooldown as well, so the redraw has to
+	# outlast the charge that put it there.
+	if _charge_time >= 0.0 or (character_id == CharacterId.GRENADIER and ability_on_cooldown):
 		queue_redraw()
 
 const CHARGE_RING_RADIUS := 26.0
@@ -1751,25 +1766,35 @@ const CHARGE_RING_EDGE_COLOR := Color(0.12, 0.09, 0.06, 0.8)
 ## the ground the shell is being measured across.
 const CHARGE_RING_CENTRE := Vector2(0.0, 8.0)
 
-## The dial under the Grenadier's feet while a shot is being held.
+const COOLDOWN_DIAL_COLOR := Color(0.85, 0.2, 0.16, 0.7)
+
+## The dial under the Grenadier's feet, in its two states.
 ##
-## It is a disc that paints in **clockwise** from twelve o'clock, smoothly rather
-## than snapping cell to cell — the hold is continuous, so the fill reads that way
-## too, with the actual throw only rounding to a cell at the moment it's released.
-## The spokes are drawn over it regardless, one per cell of extra range, so what
-## the sweep is *worth* is still legible while it's moving: a full circle of
-## colour is the longest throw this Grenadier has. A full charge pulses, because
-## the moment worth knowing about is the one where holding on stops buying
-## anything.
+## Charging, it is a disc that paints in **clockwise** from twelve o'clock,
+## smoothly rather than snapping cell to cell — the hold is continuous, so the
+## fill reads that way too, with the actual throw only rounding to a cell at
+## the moment it's released. The spokes are drawn over it regardless, one per
+## cell of extra range, so what the sweep is *worth* is still legible while
+## it's moving: a full circle of colour is the longest throw this Grenadier
+## has. A full charge pulses, because the moment worth knowing about is the one
+## where holding on stops buying anything.
+##
+## On cooldown it is the same disc in red, unwinding **anticlockwise** — the
+## charge running backwards, which is exactly what a cooldown is. The two can
+## never be on screen together (a charge is refused while the launcher is hot),
+## so the direction and the colour together say which of the two you are looking
+## at without having to read any of it.
 func _draw() -> void:
 	if _charge_time >= 0.0:
 		_draw_shot_preview()
 		_draw_charge_dial()
+	elif character_id == CharacterId.GRENADIER and ability_on_cooldown:
+		_draw_cooldown_dial()
 
 ## Where the shell would come down if the button were let go this instant: the
 ## landing cell outlined, the cells its blast would cover tinted, and a dashed
 ## line from the feet to it. It is read straight off the same functions the throw
-## uses (_charged_range, _grenade_landing_cell, _grenade_shot_radius), so what it
+## uses (_charged_range, _grenade_landing_cell, _grenade_blast_cells), so what it
 ## promises and what _throw_grenade does cannot drift apart, and it follows the
 ## launcher if the player turns while charging. Cyan, never orange: orange is the
 ## dial and the in-flight marker, both of which mean "committed".
@@ -1781,7 +1806,7 @@ func _draw_shot_preview() -> void:
 	if landing == INVALID_CELL:
 		return
 	var cells: int = absi(landing.x - from.x) + absi(landing.y - from.y)
-	var blast = arena.blast_cells(landing, _grenade_shot_radius(cells), false)
+	var blast = _grenade_blast_cells(landing, facing_dir, cells)
 	# The same refusal _throw_grenade makes, shown red instead of left as a shot
 	# that silently does nothing when the button comes up.
 	var colour := GRENADE_PREVIEW_BLOCKED_COLOR if blast.has(from) else GRENADE_PREVIEW_COLOR
@@ -1816,6 +1841,24 @@ func _draw_charge_dial() -> void:
 			CHARGE_RING_EDGE_COLOR, 1.5)
 	_draw_dial_rim()
 
+## What is left of the cooldown, not what has elapsed: the red drains away and
+## the dial is empty at the moment the launcher is ready again, so "nothing on
+## the ground under them" is the same signal as "can shoot".
+##
+## Drawn with the same clockwise-from-top slice as the charge dial, just fed
+## `left` instead of a filled fraction, so the cooldown is exactly the charge
+## animation played with time reversed and it retreats anticlockwise as a
+## direct consequence rather than from a separately-chosen sign.
+func _draw_cooldown_dial() -> void:
+	if _ability_timer == null or ability_cooldown <= 0.0:
+		return
+	var left := clampf(_ability_timer.time_left / ability_cooldown, 0.0, 1.0)
+	if left <= 0.0:
+		return
+	draw_circle(CHARGE_RING_CENTRE, CHARGE_RING_RADIUS, CHARGE_RING_TRACK_COLOR)
+	_draw_dial_slice(-PI / 2.0, TAU * left, COOLDOWN_DIAL_COLOR)
+	_draw_dial_rim()
+
 func _draw_dial_rim() -> void:
 	draw_arc(CHARGE_RING_CENTRE, CHARGE_RING_RADIUS, 0.0, TAU, 40, CHARGE_RING_EDGE_COLOR, 1.5)
 
@@ -1830,27 +1873,31 @@ func _draw_dial_slice(from_angle: float, sweep: float, colour: Color) -> void:
 		points.append(CHARGE_RING_CENTRE + Vector2(cos(a), sin(a)) * CHARGE_RING_RADIUS)
 	draw_colored_polygon(points, colour)
 
-## Blast of a shell thrown `cells` away: whatever the launcher has, but never
-## enough of it to reach back to the person who fired it.
+## The blast of a shell thrown `cells` away along `dir`: the launcher's full radius
+## on three sides, and on the fourth — the one pointing back down the throw at the
+## person who fired it — one cell short of them, so it can never reach back.
 ##
-## This is what makes a tap safe at any radius. A shell landing two cells away
-## can only ever be a radius-1 blast, three cells buys radius 2, and so on — so
-## charging buys reach and power together, a close shot is deliberately a small
-## one, and the way to throw your whole blast is to throw it properly far.
-func _grenade_shot_radius(cells: int) -> int:
-	return clampi(_grenade_radius(), 1, maxi(1, cells - 1))
+## It used to shrink the *whole* blast to fit the gap, so a close shot was a small
+## shot in every direction, including the three that were never in any danger. Only
+## the arm that could hit the thrower is trimmed now.
+func _grenade_blast_cells(landing: Vector2i, dir: Vector2i, cells: int) -> Dictionary:
+	return arena.blast_cells(landing, _grenade_radius(), false, -dir, cells - 1)
+
+## How many shells beyond the starting kit this Grenadier has collected.
+func _grenade_extra_shells() -> int:
+	return maxi(0, bomb_count_max - GRENADE_START_SHELLS)
+
+## The cooldown for the next shot, from how many shells have been collected.
+func _grenade_cooldown() -> float:
+	return GRENADE_COOLDOWNS[mini(_grenade_extra_shells(), GRENADE_COOLDOWNS.size() - 1)]
 
 ## A shell always covers its own cell, and grows by half of whatever radius its
 ## thrower has picked up — so a radius powerup is worth exactly half as much to
 ## the launcher as it is to the bombs this player puts on the floor.
 ##
-## Halving it is what keeps the shot from reaching back down its own three cells
-## of range: at full radius the blast would be killing the Grenadier from two
-## powerups in, which turns a pickup everyone else wants into one that breaks
-## this character's only ability. It is still possible to grow into it — four
-## radius powerups puts the far edge of the blast on the tube it came out of —
-## but by then it is a choice about a stat that has already paid for itself
-## several times over, not a trap sprung on someone who took the second one.
+## Halving it keeps a radius powerup from outgrowing the launcher's range: the blast
+## grows half as fast as the throw does (one cell of range per powerup, one of radius
+## per two), so the far edge of a shot never gets ahead of where it is thrown.
 func _grenade_radius() -> int:
 	return 1 + (bomb_radius - 1) / 2
 
@@ -1894,8 +1941,15 @@ func use_ability() -> void:
 			used = _throw_grenade()
 	if used:
 		ability_on_cooldown = true
-		get_tree().create_timer(ability_cooldown).timeout.connect(func():
-			ability_on_cooldown = false)
+		# Held rather than fired and forgotten: the Grenadier's dial reads time_left
+		# off it, so there is one clock rather than a second one kept in step.
+		_ability_timer = get_tree().create_timer(ability_cooldown)
+		# The redraw matters as much as the flag: _process stops asking for one the
+		# moment the cooldown is over, and a CanvasItem keeps whatever it last drew
+		# until something asks again — which would leave the spent dial painted.
+		_ability_timer.timeout.connect(func():
+			ability_on_cooldown = false
+			queue_redraw())
 
 ## Drops a temp wall on the Engineer's own cell — passable for them (see
 ## Arena.is_walkable_for), solid for everyone else, bombs, and explosions.

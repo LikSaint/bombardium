@@ -140,7 +140,7 @@ In-match:
 | Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, and skating: unbroken straight-line running charges speed up to 1.6x over 0.8s | Kick the bomb in front of you **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide |
 | Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two |
 | Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its blast reaches — the full radius of an ordinary bomb of yours — and it goes off 0.15s after being tripped. An ordinary bomb **can be placed on top of a mine** (so a Miner boxed in by their own field can still blast out) — the mine then goes off together with that bomb |
-| Grenadier (Гранатомётчик) | +1 shield, **two shells** (they are its bombs — it has no ordinary ones; +1 shell per bomb powerup), a short 0.3s reload between shots | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells with the blast shrunk to fit, **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
+| Grenadier (Гранатомётчик) | +1 shield, **two shells** (they are its bombs — it has no ordinary ones; +1 shell per bomb powerup), a long cooldown that **shrinks with every shell collected** | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. **Tap** the bomb button for 2 cells (the blast is cut short only on the side facing you), **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
 
 The Sapper's mines stay live until triggered — by the ability button, or by chain-detonating in
 someone else's blast — with no timeout of their own, so `bomb_count_current` doesn't refill until
@@ -180,12 +180,13 @@ Everything about the shot is built to keep it from being artillery.
 How far it goes is the one thing the player controls, and it is set by how long the button is held
 rather than by aiming:
 
-- A **tap** throws two cells and shrinks *that shell's* blast to whatever fits in the gap
-  (`Player._grenade_shot_radius`): two cells away can only ever be a radius-1 blast, three cells buys
-  radius 2, and so on up to the launcher's own. So a tap is safe to take at any radius — a Grenadier
-  with a big blast still lobs one right in front of themselves instead of being pushed further out by
-  their own upgrades — and charging buys power as well as reach, since the only way to throw your
-  whole blast is to throw it properly far.
+- A **tap** throws two cells. The blast is the launcher's full radius on **three** sides; only the
+  arm pointing back at the thrower is cut, to stop one cell short of them
+  (`Player._grenade_blast_cells`, which hands the arena a one-arm cap — `Arena.blast_cells`'s
+  `capped_dir` / `capped_radius`, carried by the shell as `Bomb.capped_dir` / `capped_radius`). So a
+  tap is safe to take at any radius and is not a weaker shot where it matters. (It used to shrink the
+  *whole* blast to fit the gap, which made a close shot small in the three directions that were never
+  in any danger.) A close throw with a radius-3 launcher is a back arm of one and three arms of three.
 - **Holding** paints in a dial at the Grenadier's feet over `Player.GRENADE_CHARGE_TIME` (0.6s) and
   walks the landing cell out to `GRENADE_CHARGED_RANGE` (4) — plus a cell for every **radius**
   powerup, so reach grows with the blast (`Player._grenade_max_range`). Holding also **plants
@@ -213,22 +214,25 @@ lobbed over the crate somebody is hiding behind arrives with the least warning o
 Pricing the rest by distance is what stops the charged shot from being strictly better than the tap:
 it reaches further, but it hangs in the air longer and is that much easier to walk out from under.
 
-On top of the per-shot cap, the launcher only ever has **half** the radius its thrower has picked up
-(`Player._grenade_radius()`), so a radius powerup is worth exactly half as much to it as to a bomb on
-the floor — a full-strength blast on a shell you can drop three cells away with no risk to yourself
-would otherwise be the best thing in the game. Between the two rules a shell can never cover the cell
-it was thrown from, and the shot is refused outright in any case where the arena says it would.
+The launcher only ever has **half** the radius its thrower has picked up
+(`Player._grenade_radius()`), so a radius powerup is worth half as much to it as to a bomb on the
+floor — and, with reach growing a cell per powerup, the blast never gets ahead of where it is
+thrown. Between that and the trimmed back arm a shell can never cover the cell it was thrown from,
+and the shot is refused outright in any case where the arena says it would.
 
 A shell costs a bomb charge and hands it back when it goes off, which keeps it inside the same
-accounting as everyone else's ordnance — and those charges are what limit how many are in the air.
-`Player.GRENADE_RELOAD` (0.3s) is only the gap between two shots, counted **from the throw rather
-than from the landing**, so a Grenadier holding N shells can put all N in the air one after another
-while the first is still falling, each returning when it lands. (It has been 1.2s on top of the
-flight, then 0.6s, then nothing at all; the long ones got in the way of the one thing the character
-is for, which is putting several shells down around a target, and with none a button held down
-emptied the launcher onto one cell.) The reload also gates starting a charge. Bots pause
-`Player.BOT_GRENADE_GAP` (0.8s) between shots on top of it, so they don't empty the launcher onto one
-cell.
+accounting as everyone else's ordnance. The **cooldown** is what turns collecting them into a
+progression: it is a table (`Player.GRENADE_COOLDOWNS`) indexed by how many shells beyond the two the
+launcher starts with have been collected, counted from the throw — **1.6s** at the starting kit,
+**1.0s** with one extra, **0.6s** with two, then 0.4s, 0.25s and a floor of **0.15s**. A starting
+Grenadier lobs one shell and waits for it; one with a handful can put several in the air at nearly
+the pace they can press the button. (It was a flat 0.3s, before that none at all, before that the
+flight plus 1.2s — the long ones got in the way of the one thing the character is for, which is
+putting several shells down around a target, and none made a held button empty the launcher onto one
+cell.) On cooldown the dial under the feet is the charge dial in red, draining **anticlockwise** to
+nothing at the moment the launcher is ready again, and the cooldown also gates starting a charge.
+Bots pause `Player.BOT_GRENADE_GAP` (0.8s) between shots on top of it, so they don't empty a full
+launcher onto one cell.
 
 **Nothing stops a shell**, at either end. Crates, water, bombs, people and stone are all flown over,
 and a shell aimed at a wall goes off *on* the wall, its blast spreading out of the impact into
@@ -448,12 +452,28 @@ Four kinds are live today, weighted against each other (`Consts.HAZARD_WEIGHTS`)
   upgraded runner exactly as much as someone who never picked up a speed powerup.
 - **Saw** — rolls in a straight line, bounces off walls and crates at right angles, and sinks for
   good if it rolls into water. Kills on contact, dies to a single blast (`scripts/Saw.gd`).
-- **Gas cloud** — doesn't move or block movement, just makes a patch of open ground (its own short
-  flood-fill from the spawn cell, not `Arena.blast_cells`) unsafe to linger in for `LIFETIME` (6s),
-  growing outward ring by ring rather than appearing all at once (`scripts/GasCloud.gd`).
-- **Turret** — stationary, fires a shell at the nearest player on an interval by reusing the
-  Grenadier's own thrown-shell flight and landing telegraph. Two armor — dies to a second blast, not
-  the first, since it can't run from the first one (`scripts/Turret.gd`).
+- **Fire** (still `GasCloud` in the code — the class, scene and `"gas_clouds"` group kept their names
+  from when it was a green poison cloud nobody could identify) — doesn't move or block movement, just
+  makes a patch of open ground (its own short flood-fill from the spawn cell, not
+  `Arena.blast_cells`) unsafe to stand in for `LIFETIME` (6s), burning outward ring by ring rather
+  than appearing all at once (`scripts/GasCloud.gd`). Drawn as orange flames over scorched ground.
+  For the first `WARMUP_DURATION` (0.6s) it only *outlines* the cells it is about to take, pulsing,
+  and hurts nobody — so whoever is next to the crate has a moment to step out of the footprint.
+- **Turret** — stationary, drawn as a grenade launcher on a round mount: the olive tube tracks the
+  nearest player, the muzzle heats up and a shell shows in it during the windup, and the tube kicks
+  back with a flash when it fires. It fires a shell at that player on an interval by reusing the
+  Grenadier's own thrown-shell flight and landing telegraph, the shell leaving from the muzzle.
+  Two armor — dies to a second blast, not the first, since it can't run from the first one
+  (`scripts/Turret.gd`).
+
+**Every hazard is announced the same way** (`Arena._announce_hazard`, called from `_roll_hazard` for
+every kind, so a new one gets it for free): a yellow warning triangle with an exclamation mark hovers
+over the crate's cell for two seconds with two rings pulsing out of it, and an alarm sounds
+(`assets/sfx/hazard_alarm.wav`, written by `tools/hazard_alarm_wav.py`). The sign is the same for
+all of them on purpose, and there is no text — it means "something dangerous just came out of that
+crate", and what it is, the thing itself shows. The triangle sits above the cell so it never hides
+the hazard emerging underneath (`scripts/HazardAlert.gd`). A cursed powerup is *not* announced: it
+is meant to be indistinguishable from an ordinary one apart from the faint red glow.
 
 Saw and Turret both join the `"hazard_mobs"` group — the shared contract any contact hazard has to
 meet (`cell`, `next_cell`, `take_hit()`) so blast damage (`Bomb._apply_blast`), Sudden Death/bridge

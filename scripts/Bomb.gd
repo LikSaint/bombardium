@@ -150,6 +150,10 @@ signal exploded
 @export var magnetic: bool = false # Magnet passive: crawls toward the nearest opponent
 @export var is_mine: bool = false # Miner ability: walkable, no fuse, tripped by opponents
 @export var thrown: bool = false # Grenadier ability: flies to `cell` over the map, explodes on landing
+## A thrown shell's blast is the full `radius` on three sides and only `capped_radius`
+## on the side pointing back at whoever threw it (ZERO = no cap, every other bomb).
+var capped_dir: Vector2i = Vector2i.ZERO
+var capped_radius: int = 0
 var cell: Vector2i
 var arena: Node2D
 var owner_player: Node2D
@@ -335,7 +339,7 @@ func _update_flight(delta: float) -> void:
 ## two that happen to agree — and so an opponent safely round a corner doesn't
 ## set off a mine that could never have touched them.
 func _blast_cells() -> Dictionary:
-	return arena.blast_cells(cell, radius, is_star_blast)
+	return arena.blast_cells(cell, radius, is_star_blast, capped_dir, capped_radius)
 
 ## How much fuse is left, 1.0 to 0.0. Measured against the fuse the bomb was
 ## planted with rather than against Timer.wait_time, because a magnet bomb that

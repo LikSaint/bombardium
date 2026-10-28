@@ -29,6 +29,7 @@ const SOUNDS := {
 	"match_win": preload("res://assets/sfx/match_win.wav"),
 	"countdown_tick": preload("res://assets/sfx/countdown_tick.wav"),
 	"menu": preload("res://assets/sfx/menu.wav"),
+	"hazard_alarm": preload("res://assets/sfx/hazard_alarm.wav"),
 }
 
 var volume: float = DEFAULT_VOLUME

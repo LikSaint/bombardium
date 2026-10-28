@@ -8,6 +8,7 @@ const PowerupScene := preload("res://scenes/Powerup.tscn")
 const SawScene := preload("res://scenes/Saw.tscn")
 const GasCloudScene := preload("res://scenes/GasCloud.tscn")
 const TurretScene := preload("res://scenes/Turret.tscn")
+const HazardAlertScript := preload("res://scripts/HazardAlert.gd")
 const WALL_TEXTURE := preload("res://assets/props/wall.png")
 const PlayerScript := preload("res://scripts/Player.gd")
 
@@ -427,7 +428,20 @@ func _roll_hazard(cell: Vector2i) -> bool:
 			_spawn_turret(cell)
 		Consts.HazardType.GAS_CLOUD:
 			_spawn_gas_cloud(cell)
+	_announce_hazard(kind, cell)
 	return true
+
+## Every hazard arrives with the same announcement, whatever it is: a warning
+## triangle over the cell it came out of, and an alarm. Without it a saw or a turret
+## was simply there, and a fire was already spreading, with only a dull thud to say
+## so. It is called from _roll_hazard for every kind, so a new hazard gets it for
+## free rather than having to remember to ask.
+func _announce_hazard(_kind: int, cell: Vector2i) -> void:
+	var alert := Node2D.new()
+	alert.set_script(HazardAlertScript)
+	alert.position = cell_to_world(cell)
+	add_child(alert)
+	Sfx.play("hazard_alarm", 1.0, 0.0)
 
 ## Weighted pick among the kinds that currently have somewhere to go (see the
 ## per-kind caps in _hazard_kind_available). A kind with no room left is
@@ -661,15 +675,22 @@ func is_pit(cell: Vector2i) -> bool:
 ## whose idea of a blast disagrees with the blast is a bot that strolls into
 ## fire, and a mine whose trigger range disagrees with its own explosion goes
 ## off at people it could never have reached.
-func blast_cells(origin: Vector2i, radius: int, is_star: bool) -> Dictionary:
-	return _star_blast_cells(origin, radius) if is_star else _cross_blast_cells(origin, radius)
+## `capped_dir` / `capped_radius` shorten *one* arm of a cross blast and leave the
+## other three at full `radius`. Only the Grenadier's shells use it (see
+## Player._throw_grenade): the arm pointing back at the thrower stops short of them
+## and nothing else about the blast is reduced.
+func blast_cells(origin: Vector2i, radius: int, is_star: bool, capped_dir: Vector2i = Vector2i.ZERO, capped_radius: int = 0) -> Dictionary:
+	return _star_blast_cells(origin, radius) if is_star else _cross_blast_cells(origin, radius, capped_dir, capped_radius)
 
 ## Four arms, each ending at the first solid thing. A temp wall is reached and
 ## burns; permanent stone is not reached at all. Either way the arm stops there.
-func _cross_blast_cells(origin: Vector2i, radius: int) -> Dictionary:
+func _cross_blast_cells(origin: Vector2i, radius: int, capped_dir: Vector2i = Vector2i.ZERO, capped_radius: int = 0) -> Dictionary:
 	var hit := {origin: true}
 	for dir in Consts.DIRECTIONS:
-		for i in range(1, radius + 1):
+		var reach := radius
+		if dir == capped_dir:
+			reach = mini(radius, capped_radius)
+		for i in range(1, reach + 1):
 			var c: Vector2i = origin + dir * i
 			if not in_bounds(c):
 				break
