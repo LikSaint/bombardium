@@ -149,7 +149,7 @@ func set_random_indestructible_walls(value: bool) -> void:
 const POWERUP_CHANCE_MIN := 0
 const POWERUP_CHANCE_MAX := 100
 const POWERUP_CHANCE_STEP := 5
-const DEFAULT_POWERUP_CHANCE_PERCENT := 35 # was 20
+const DEFAULT_POWERUP_CHANCE_PERCENT := 30 # was 20, then 35
 var powerup_chance_percent: int = DEFAULT_POWERUP_CHANCE_PERCENT
 
 func set_powerup_chance_percent(value: int) -> void:
