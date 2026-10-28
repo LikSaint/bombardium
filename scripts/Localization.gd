@@ -34,7 +34,7 @@ const STRINGS := {
 		"CHAR_DESC_BOMB_KICKER": "Толкает бомбы движением — свои и чужие — на 2 клетки, +1 за каждый бонус скорости",
 		"CHAR_DESC_MAGNET": "Его бомбы сами ползут к ближайшему сопернику — медленно, но неотвязно",
 		"CHAR_DESC_MINER": "%s: Часть бомб ставит невидимыми минами — они рвутся у врага под ногами",
-		"CHAR_DESC_GRENADIER": "Вместо бомб — гранатомёт, две гранаты с короткой перезарядкой. Зажми кнопку бомбы, стоя на месте, чтобы бросить дальше: клетка падения подсвечивается. Бонусы бомб добавляют гранаты, бонусы взрыва — дальность",
+		"CHAR_DESC_GRENADIER": "Вместо бомб — гранаты. Зажми кнопку, стоя на месте, — бросок дальше; клетка падения подсвечена",
 
 		"MAP_SIZE_TINY": "Крошечная",
 		"MAP_SIZE_SMALL": "Маленькая",
@@ -114,7 +114,7 @@ const STRINGS := {
 		"CHAR_DESC_BOMB_KICKER": "Pushes bombs by walking into them — theirs or anyone's — 2 cells, +1 per speed powerup",
 		"CHAR_DESC_MAGNET": "Their bombs crawl toward the nearest opponent on their own — slowly, but they don't let go",
 		"CHAR_DESC_MINER": "%s: Spends some bombs as invisible mines — they go off under an opponent's feet",
-		"CHAR_DESC_GRENADIER": "No bombs — a two-shell launcher with a short reload. Hold the bomb button, standing still, to throw further: the landing cell lights up. Bomb powerups add shells, blast powerups add reach",
+		"CHAR_DESC_GRENADIER": "Throws shells instead of bombs. Hold the button while standing still to throw further — the landing cell lights up",
 
 		"MAP_SIZE_TINY": "Tiny",
 		"MAP_SIZE_SMALL": "Small",
