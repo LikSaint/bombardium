@@ -9,6 +9,8 @@ shader_type canvas_item;
 uniform vec4 team_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 uniform float saturation_threshold : hint_range(0.0, 1.0) = 0.16;
 uniform float falloff : hint_range(0.01, 0.5) = 0.06;
+// 0..1: how far the whole sprite is pushed towards red (damage flash).
+uniform float hit_flash : hint_range(0.0, 1.0) = 0.0;
 
 vec3 rgb2hsv(vec3 c) {
 	vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -33,5 +35,9 @@ void fragment() {
 	float mask = 1.0 - smoothstep(saturation_threshold, saturation_threshold + falloff, hsv.y);
 	vec3 recolored = hsv2rgb(vec3(team_hsv.x, max(hsv.y, team_hsv.y), hsv.z));
 
-	COLOR = vec4(mix(tex.rgb, recolored, mask), tex.a);
+	vec3 base = mix(tex.rgb, recolored, mask);
+	// Keeps the sprite's own shading so the silhouette doesn't turn into a flat blob.
+	float lum = dot(base, vec3(0.299, 0.587, 0.114));
+	vec3 red = vec3(0.45 + lum * 0.55, lum * 0.15, lum * 0.15);
+	COLOR = vec4(mix(base, red, hit_flash), tex.a);
 }

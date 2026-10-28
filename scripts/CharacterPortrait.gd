@@ -30,6 +30,10 @@ func set_character(char_id: int, team_color: Color) -> void:
 	$Sprite.material.set_shader_parameter("team_color", team_color)
 	_apply_frame()
 
+## 0..1 — how red the whole sprite is. Driven by Player's damage flash.
+func set_hit_flash(amount: float) -> void:
+	$Sprite.material.set_shader_parameter("hit_flash", amount)
+
 ## dir is a 4-directional Vector2i (one axis non-zero, or zero to leave as-is).
 func face(dir: Vector2i) -> void:
 	var new_dir: String = current_dir

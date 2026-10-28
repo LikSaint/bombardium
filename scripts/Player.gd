@@ -2027,13 +2027,35 @@ func die() -> void:
 		return
 	_kill()
 
+const DEATH_DURATION := 0.7
+
 func _kill() -> void:
 	_cancel_charge()
 	alive = false
-	visible = false
+	$Portrait.set_walking(false)
+	_play_death_animation()
 	Sfx.play("player_death")
 	GameManager.player_died(player_id)
 	died.emit(player_id)
+
+## `alive` is already false by the time this plays, so nothing in the game
+## treats the body as a player any more — this is only what the dead one looks
+## like on the way out: a hard red flash, then it sinks, tilts and fades.
+func _play_death_animation() -> void:
+	if _invuln_tween:
+		_invuln_tween.kill()
+	var portrait: Node2D = $Portrait
+	portrait.set_hit_flash(1.0)
+	var base_scale: Vector2 = portrait.scale
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(portrait, "scale", base_scale * Vector2(0.9, 0.2), DEATH_DURATION) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(portrait, "position:y", portrait.position.y + 14.0, DEATH_DURATION) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(portrait, "rotation", deg_to_rad(18.0), DEATH_DURATION)
+	tw.tween_property(portrait, "modulate:a", 0.0, DEATH_DURATION * 0.5).set_delay(DEATH_DURATION * 0.5)
+	tw.chain().tween_callback(func(): visible = false)
 
 const SHOVE_DURATION := 0.12
 
@@ -2081,14 +2103,21 @@ func _escape_cell(from_cell: Vector2i, push_dir: Vector2i) -> Vector2i:
 			return cell
 	return INVALID_CELL
 
+var _invuln_tween: Tween
+
 func _start_invulnerability() -> void:
 	is_invulnerable = true
-	var tw := create_tween()
-	tw.set_loops(int(INVULN_DURATION / (INVULN_BLINK_INTERVAL * 2)))
-	tw.tween_property($Portrait, "modulate:a", 0.15, INVULN_BLINK_INTERVAL)
-	tw.tween_property($Portrait, "modulate:a", 1.0, INVULN_BLINK_INTERVAL)
+	if _invuln_tween:
+		_invuln_tween.kill()
+	# Red <-> normal; ends back on normal after INVULN_DURATION.
+	_invuln_tween = create_tween()
+	_invuln_tween.set_loops(roundi(INVULN_DURATION / (INVULN_BLINK_INTERVAL * 2.0)))
+	_invuln_tween.tween_method($Portrait.set_hit_flash, 0.0, 1.0, INVULN_BLINK_INTERVAL)
+	_invuln_tween.tween_method($Portrait.set_hit_flash, 1.0, 0.0, INVULN_BLINK_INTERVAL)
 	get_tree().create_timer(INVULN_DURATION).timeout.connect(_end_invulnerability)
 
 func _end_invulnerability() -> void:
 	is_invulnerable = false
-	$Portrait.modulate.a = 1.0
+	if _invuln_tween:
+		_invuln_tween.kill()
+	$Portrait.set_hit_flash(0.0)
