@@ -95,7 +95,7 @@ var kick_distance: int = KICK_BASE_DISTANCE
 # While held, the target cell is outlined and a dial at the feet fills towards the next
 # build, the same dial the Grenadier's charge uses.
 const BUILD_TICK := 0.8
-## How long the button is held, inside a level-3 wall, to turn it into a turret — longer on
+## How long the button is held, aimed at a level-3 wall, to turn it into a turret — longer on
 ## purpose than a whole climb from nothing to level 3 (1.6s), since it costs a bomb for as
 ## long as the turret lives.
 const TURRET_UPGRADE_TIME := 3.0
@@ -1781,6 +1781,7 @@ func _place_ordnance(as_mine: bool) -> bool:
 		return false
 	var current_cell := get_current_cell()
 	if _effective_bomb_count_current() < (2 if as_mine else 1):
+		_warn_limit()
 		return false
 	# A bomb may go down on top of a mine — the Miner would otherwise be unable to
 	# blast their way out of a pocket they had seeded themselves — but nothing goes
@@ -1919,6 +1920,9 @@ func _begin_charge() -> void:
 	# throw, the button does nothing at all and no dial appears to promise
 	# otherwise.
 	if ability_on_cooldown or bomb_count_current < 1:
+		# A launcher that is merely cooling down says nothing; one with no shell to throw does.
+		if not ability_on_cooldown:
+			_warn_limit()
 		return
 	_charge_time = 0.0
 	_charge_diagonal = Vector2i.ZERO
@@ -2263,11 +2267,20 @@ func _build_plan(target: Vector2i) -> int:
 		return BuildPlan.WALL
 	return BuildPlan.NOTHING
 
+## True if a wall would go on `target` but for the cap — one per bomb — rather than for
+## something in the way there.
+func _wall_blocked_by_cap(target: Vector2i) -> bool:
+	return arena != null and active_temp_walls.size() >= bomb_count_max \
+			and arena.get_temp_wall(target) == null and not arena.can_build_bridge_at(target) \
+			and arena.can_build_wall_at(target)
+
 ## One build tick at the cell in front. Returns whether anything was built.
 func _build_tick() -> bool:
 	var target := _build_target()
 	var plan := _build_plan(target)
 	var ticks := _build_ticks_at(target)
+	if plan == BuildPlan.NOTHING and _wall_blocked_by_cap(target):
+		_warn_limit()
 	# Counted whether or not it built anything: standing over a wall that is already as
 	# tall as this tick's level is still time spent on the way to the next one.
 	_build_cell = target
@@ -2320,6 +2333,18 @@ func _turret_candidate_at(cell: Vector2i) -> Node:
 		return null
 	return wall
 
+## True if the wall at `target` is one the Engineer could turn into a turret, but for the bombs:
+## no spare one, or already as many turrets as half their bombs allows.
+func _turret_blocked_by_bombs(target: Vector2i) -> bool:
+	if arena == null:
+		return false
+	var wall: Node = arena.get_temp_wall(target)
+	if wall == null or wall.is_turret or wall.level < wall.MAX_LEVEL or wall.hp < wall.level:
+		return false
+	if arena.temp_wall_cells.get(target) != self:
+		return false
+	return _effective_bomb_count_current() < 2 or active_turret_count() >= turret_limit()
+
 ## The hold has run its full time: spend the charge and make the turret. The charge stays
 ## spent for as long as the turret stands (TempWall gives it back when it goes).
 func _finish_turret_upgrade(cell: Vector2i) -> void:
@@ -2339,6 +2364,8 @@ func _turret_hold_step(delta: float) -> bool:
 	var wall := _turret_candidate_at(target)
 	if wall == null:
 		_clear_upgrade_ghost()
+		if _turret_blocked_by_bombs(target):
+			_warn_limit()
 		return false
 	if target != _upgrade_cell:
 		_clear_upgrade_ghost()
@@ -2581,6 +2608,31 @@ func is_sheltered() -> bool:
 func grant_silent_grace(seconds: float) -> void:
 	is_invulnerable = true
 	get_tree().create_timer(seconds).timeout.connect(_end_invulnerability)
+
+const LimitWarningScript := preload("res://scripts/LimitWarning.gd")
+## Seconds before the same warning can start over: a hold that keeps trying (the Engineer
+## building past their wall cap) would otherwise restart it on every frame and it would never
+## get off the ground.
+const LIMIT_WARNING_GAP := 0.6
+var _limit_warning: Node = null
+var _limit_warning_at: float = -10.0
+
+## Something the bomb bonus limits was just refused for lack of it: put the bomb icon over
+## the character's head, red and shaking and rising away (see LimitWarning). Only for a
+## person — a bot doesn't read it, and would only make noise.
+func _warn_limit() -> void:
+	if is_bot:
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _limit_warning_at < LIMIT_WARNING_GAP:
+		return
+	_limit_warning_at = now
+	if _limit_warning != null and is_instance_valid(_limit_warning):
+		_limit_warning.restart()
+		return
+	_limit_warning = Node2D.new()
+	_limit_warning.set_script(LimitWarningScript)
+	add_child(_limit_warning)
 
 const INVULN_DURATION := 1.0
 const INVULN_BLINK_INTERVAL := 0.1

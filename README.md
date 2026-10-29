@@ -614,6 +614,14 @@ explodes when caught in someone else's blast, is designed but not built — see
   there until the pad came back and claimed it.) A match with **only bots left** in it ends after
   `Main.NO_HUMANS_GRACE` (5s), with the count shown, and drops back to the Lobby — unless somebody joins
   in the meantime.
+- **Out of bombs.** When a person tries to put down something the bomb bonus limits and can't — a
+  bomb or a mine with no charge left, a grenade with no shell, an Engineer's wall past their cap or a
+  turret past its limit — the **bomb-bonus icon** appears over the character: the real sprite, **tinted
+  red**, shaking, rising off the head and fading out in under a second (`scripts/LimitWarning.gd`,
+  `Player._warn_limit`). The tint is a small shader that pulls the sprite's own colours toward red
+  (`TINT_STRENGTH`) rather than filling it in, so the bomb keeps its shading and its spark. A hold that keeps
+  trying shows it again at most every 0.6s, and bots never show it. Refusals for any other reason (a
+  bomb already on the cell, a crate in the way) say nothing.
 - Bots are a `player_slots` entry with `device = Consts.DEVICE_BOT`, added from the Lobby (B key) —
   no separate bot scene/node type. In `Player.gd`, `is_bot` (set from `device_id` in `_ready`)
   swaps `_poll_move_dir()`/`_input()` for `_bot_think()`, run on a `BOT_DECISION_INTERVAL` timer
