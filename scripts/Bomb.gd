@@ -70,20 +70,31 @@ const REMOTE_FUSE_DURATION := 8.0
 ## MINE_ARM_DELAY keeps a freshly planted mine from going off in the face of an
 ## opponent already standing there.
 ##
-## MINE_TRIP_DELAY is the tell between tripping a mine and wearing it. The scale
-## to read it against is distance travelled, not seconds: base move_duration is
-## 0.3s per cell, and clearing a radius-1 mine means getting two cells from its
-## centre. So this buys two-thirds of a cell — walking into a mine is meant to be
-## something you pay for, and only somebody already at the far edge of the
-## footprint gets to keep the charge they were carrying.
+## MINE_TRIP_DELAY is the tell between tripping a mine and wearing it, and it is a
+## *warning you can act on*: once tripped, the mine beeps faster and faster, and if
+## nobody it could hurt is still inside its footprint when the countdown runs out,
+## there is no blast — it quietly goes back to waiting, still planted. So the answer
+## to "I stepped on the edge of one" is to step back out, not to hope.
 ##
-## It has been as high as 0.45 (a cell and a half), which let anyone who clipped
-## the edge of the footprint stroll clear and made mines read as a suggestion, and
-## 0.25 after that, then 0.15, which read as going off the instant they were
-## touched. If they now feel unfair rather than punishing, or too slow, this is the
-## single number to move; the strobe below re-times itself to whatever it is set to.
+## The scale to read it against is distance travelled, not seconds: base move_duration
+## is 0.3s per cell. 0.7s is a cell in and a cell back out with a little to spare for
+## reacting, which is what saves somebody who only clipped the edge — and not enough to
+## cross the footprint, which takes about 0.9s through the middle, so a mine still
+## punishes anyone who keeps walking, stands their ground or is pinned there.
+##
+## History: it began at 0.2 (instant), when a trip could not be undone; it was once 0.45
+## with no way to cancel, which only let people stroll clear of the edge and made mines
+## read as a suggestion. Cancelling on leaving is what makes the longer wait fair. If
+## mines now feel too easy to dodge, lower this number first.
 const MINE_ARM_DELAY := 0.6
-const MINE_TRIP_DELAY := 0.2
+const MINE_TRIP_DELAY := 0.7
+## Beep spacing while a trip counts down: it starts at the slow end and closes in on the
+## fast end as the blast nears, which is the "about to go off" ramp.
+const MINE_BEEP_SLOW := 0.24
+const MINE_BEEP_FAST := 0.06
+## How many on/off blinks the strobe has made by the time the mine goes off; the blinks
+## come faster and faster (see _mine_strobe_on), so the last ones are a flicker.
+const MINE_STROBE_CYCLES := 7.0
 
 ## How long a freshly planted mine stays on show before sinking out of sight for
 ## good. A mine nobody can see is the trap the character is named for; a mine
@@ -169,6 +180,7 @@ var _magnet_dormant: bool = true # nobody in range; drawn asleep rather than mer
 var _fuse_total: float = 0.0
 var _mine_age: float = 0.0
 var _mine_trip_left: float = -1.0 # >= 0 once tripped: counting down to the blast
+var _mine_beep_left: float = 0.0
 var _flight_left: float = 0.0
 var _flight_total: float = 0.0 # priced off the distance, see flight_time_for
 var _flight_arc: float = 0.0
@@ -277,24 +289,46 @@ func _update_mine(delta: float) -> void:
 	_mine_age += delta
 	$BombBody.modulate.a = MINE_BODY_ALPHA * _mine_reveal_ratio()
 	if _mine_trip_left >= 0.0:
+		# Everyone it could hurt has walked out of range: nothing goes off, and the mine
+		# is back to waiting exactly where it was.
+		if not _mine_has_victim():
+			_mine_stand_down()
+			return
 		_mine_trip_left -= delta
+		_mine_beep_left -= delta
 		if _mine_trip_left <= 0.0:
 			explode()
+			return
+		if _mine_beep_left <= 0.0:
+			var progress := 1.0 - _mine_trip_left / MINE_TRIP_DELAY
+			Sfx.play("countdown_tick", 1.0 + 0.6 * progress, 0.0)
+			_mine_beep_left = lerpf(MINE_BEEP_SLOW, MINE_BEEP_FAST, progress)
 		return
 	if _mine_age < MINE_ARM_DELAY:
 		return
+	if _mine_has_victim():
+		_mine_trip_left = MINE_TRIP_DELAY
+		_mine_beep_left = 0.0 # the first beep is this frame, so the trip is heard at once
+		# Surfaces on the same frame it trips rather than on the next one, so the
+		# warning starts the moment the footprint is entered.
+		$BombBody.modulate.a = MINE_BODY_ALPHA
+
+## Whether anyone this mine would hurt is standing inside its footprint right now.
+func _mine_has_victim() -> bool:
 	var blast := _blast_cells()
 	for p in get_tree().get_nodes_in_group("players"):
 		if p == owner_player or not p.alive:
 			continue
 		if blast.has(arena.world_to_cell(p.position)):
-			_mine_trip_left = MINE_TRIP_DELAY
-			# Surfaces on the same frame it trips rather than on the next one:
-			# with MINE_TRIP_DELAY this short, a frame of invisible countdown is
-			# a measurable slice of the only warning anybody gets.
-			$BombBody.modulate.a = MINE_BODY_ALPHA
-			Sfx.play("countdown_tick")
-			return
+			return true
+	return false
+
+## The countdown stopped because nobody was left in range. A lower, falling beep tells
+## the player who just stepped back that it worked.
+func _mine_stand_down() -> void:
+	_mine_trip_left = -1.0
+	Sfx.play("countdown_tick", 0.55, 0.0)
+	queue_redraw()
 
 ## How visible the mine is right now, 1.0 to 0.0: full while it is being planted,
 ## fading out over MINE_FADE_DURATION, nothing at all through the long middle of
@@ -657,6 +691,14 @@ const MINE_BODY_ALPHA := 0.5
 ## footprint too, which is the right trade: the reach is only on show for the
 ## half-second the mine itself is, and after that the danger is that you don't
 ## know where the field is, not that you can't tell how big it is.
+## The strobe blinks slowly at first and ever faster, in step with the beeps: the phase
+## grows with the square of how far along the countdown is. A fixed number of blinks
+## (MINE_STROBE_CYCLES) whatever MINE_TRIP_DELAY is set to, so retuning the delay
+## retimes the strobe by itself.
+func _mine_strobe_on() -> bool:
+	var progress := 1.0 - _mine_trip_left / MINE_TRIP_DELAY
+	return fmod(progress * progress * MINE_STROBE_CYCLES, 1.0) < 0.5
+
 func _draw_mine() -> void:
 	var reveal := _mine_reveal_ratio()
 	if reveal <= 0.0:
@@ -664,10 +706,7 @@ func _draw_mine() -> void:
 	var tripped := _mine_trip_left >= 0.0
 	var armed := _mine_age >= MINE_ARM_DELAY
 	var tint := MINE_TRIP_COLOR if tripped else MINE_IDLE_COLOR
-	# Three on/off cycles across the window whatever MINE_TRIP_DELAY is set to,
-	# rather than a fixed 10Hz that would show two blinks at one value and six at
-	# another. The count is the part that reads; the rate follows from it.
-	var strobe := tripped and fmod(_mine_trip_left, MINE_TRIP_DELAY / 3.0) < MINE_TRIP_DELAY / 6.0
+	var strobe := tripped and _mine_strobe_on()
 
 	var footprint_alpha: float = (0.34 if strobe else (0.20 if tripped else (0.15 if armed else 0.06))) * reveal
 	for c in _blast_cells():
