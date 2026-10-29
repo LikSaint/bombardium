@@ -73,28 +73,25 @@ const REMOTE_FUSE_DURATION := 8.0
 ## MINE_TRIP_DELAY is the tell between tripping a mine and wearing it, and it is a
 ## *warning you can act on*: once tripped, the mine beeps faster and faster, and if
 ## nobody it could hurt is still inside its footprint when the countdown runs out,
-## there is no blast — it quietly goes back to waiting, still planted. So the answer
-## to "I stepped on the edge of one" is to step back out, not to hope.
+## there is no blast — it quietly goes back to waiting, still planted.
 ##
-## The scale to read it against is distance travelled, not seconds: base move_duration
-## is 0.3s per cell. 0.7s is a cell in and a cell back out with a little to spare for
-## reacting, which is what saves somebody who only clipped the edge — and not enough to
-## cross the footprint, which takes about 0.9s through the middle, so a mine still
-## punishes anyone who keeps walking, stands their ground or is pinned there.
-##
-## History: it began at 0.2 (instant), when a trip could not be undone; it was once 0.45
-## with no way to cancel, which only let people stroll clear of the edge and made mines
-## read as a suggestion. Cancelling on leaving is what makes the longer wait fair. If
-## mines now feel too easy to dodge, lower this number first.
+## It is 0.3s — one cell of walking, and a little over the 0.2s it was before the
+## stand-down existed. That is short on purpose: a player moves freely, so someone who
+## only clipped the edge of the footprint and turns straight back is out again in a
+## handful of frames, while anyone who stops, keeps walking in, or is pinned there is
+## caught. It is about a human reaction time, so the save is for the quick, not a free
+## pass. (It was once 0.45 with no way to cancel,
+## which only let people stroll clear of the edge and made mines read as a suggestion.)
+## If mines now feel too easy to dodge, lower it; too punishing, raise it.
 const MINE_ARM_DELAY := 0.6
-const MINE_TRIP_DELAY := 0.7
+const MINE_TRIP_DELAY := 0.3
 ## Beep spacing while a trip counts down: it starts at the slow end and closes in on the
 ## fast end as the blast nears, which is the "about to go off" ramp.
-const MINE_BEEP_SLOW := 0.24
-const MINE_BEEP_FAST := 0.06
+const MINE_BEEP_SLOW := 0.12
+const MINE_BEEP_FAST := 0.04
 ## How many on/off blinks the strobe has made by the time the mine goes off; the blinks
 ## come faster and faster (see _mine_strobe_on), so the last ones are a flicker.
-const MINE_STROBE_CYCLES := 7.0
+const MINE_STROBE_CYCLES := 3.0
 
 ## How long a freshly planted mine stays on show before sinking out of sight for
 ## good. A mine nobody can see is the trap the character is named for; a mine

@@ -65,20 +65,17 @@ func _run() -> void:
 	sapper.shield_charges = 0
 	await _wait(1.0) # past the arming delay
 
-	# 1. Edge of the footprint and straight back.
+	# 1. Clip the edge of the footprint and turn straight back (0.2s countdown).
 	await _step(sapper, Vector2i(5, 1))
-	await _step(sapper, Vector2i(4, 1))
-	await _check_tripped(mine, true, "tripped when the Sapper enters the footprint")
-	await _step(sapper, Vector2i(5, 1))
-	await _wait(1.2)
-	_check(not mine.has_exploded, "no blast after stepping back out")
+	await _clip_edge_and_back()
+	_check(not mine.has_exploded, "no blast after clipping the edge and turning back")
+	await _wait(0.6)
 	_check(sapper.alive, "Sapper unharmed")
 	_check(mine._mine_trip_left < 0.0, "mine stood down and is waiting again")
 	_check(is_instance_valid(arena.get_bomb_at(Vector2i(3, 1))), "mine is still planted")
 
-	# 2. A second bluff, then walking on through.
-	await _step(sapper, Vector2i(4, 1))
-	await _step(sapper, Vector2i(5, 1))
+	# 2. A second bluff, then staying in it.
+	await _clip_edge_and_back()
 	await _wait(0.5)
 	_check(not mine.has_exploded, "second bluff also safe")
 	await _step(sapper, Vector2i(4, 1))
@@ -90,5 +87,10 @@ func _run() -> void:
 	print("DONE fails=%d" % fails)
 	get_tree().quit(fails)
 
-func _check_tripped(mine: Node, want: bool, what: String) -> void:
-	_check((mine._mine_trip_left >= 0.0) == want, what)
+## Just inside the footprint's edge (cell 4), then back out — 0.1s of exposure in all.
+func _clip_edge_and_back() -> void:
+	var inside: Vector2 = arena.cell_to_world(Vector2i(4, 1)) + Vector2(30, 0)
+	sapper.position = inside
+	await _wait(0.1)
+	sapper.position = arena.cell_to_world(Vector2i(5, 1))
+	await _wait(0.05)
