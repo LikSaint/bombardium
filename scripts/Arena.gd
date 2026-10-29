@@ -282,6 +282,11 @@ func break_bridge_at(cell: Vector2i) -> void:
 	if bridge.get("built", false):
 		bridges.erase(cell)
 	if was_intact:
+		# A wall on the planks comes down with them — and first, so it hands its cell back
+		# before the cell becomes water.
+		var wall := get_temp_wall(cell)
+		if wall != null:
+			wall.destroy()
 		cells[cell] = CellState.CHASM
 		Sfx.play("wall_destroy")
 		# Whatever was standing on the planks goes into the water with them. A
@@ -643,12 +648,16 @@ func place_temp_wall(cell: Vector2i, owner: Node = null, level: int = 1) -> Node
 	queue_redraw()
 	return wall
 
+## The index entries go whatever the cell has turned into in the meantime: a wall built on a
+## bridge that a blast then broke stands on a chasm, not a WALL cell, and leaving its entry
+## behind meant the next blast on that cell called `hit` on a node that was long gone — a
+## script error in the editor and a hard crash (segfault) in an exported build.
 func remove_temp_wall(cell: Vector2i) -> void:
+	temp_wall_cells.erase(cell)
+	temp_wall_nodes.erase(cell)
 	if cells.get(cell) == CellState.WALL:
 		cells[cell] = CellState.EMPTY
-		temp_wall_cells.erase(cell)
-		temp_wall_nodes.erase(cell)
-		queue_redraw()
+	queue_redraw()
 
 func is_temp_wall(cell: Vector2i) -> bool:
 	return temp_wall_cells.has(cell)
@@ -656,17 +665,30 @@ func is_temp_wall(cell: Vector2i) -> bool:
 # Lets an explosion kill a temp wall immediately instead of leaving its sprite up
 # until its own timer fires.
 func destroy_temp_wall_at(cell: Vector2i) -> void:
-	if temp_wall_nodes.has(cell):
-		temp_wall_nodes[cell].destroy()
+	var wall := get_temp_wall(cell)
+	if wall != null:
+		wall.destroy()
 
+## The wall standing on `cell`, or null. An entry whose node has already been freed (or is
+## on its way out this frame) is dropped rather than returned: a second blast landing in
+## the frame a wall came down used to call `hit` on the freed node, which is a script error
+## in the middle of Bomb._apply_blast — the rest of that blast was skipped and the bomb never
+## cleaned up after itself.
 func get_temp_wall(cell: Vector2i) -> Node:
-	return temp_wall_nodes.get(cell)
+	var wall = temp_wall_nodes.get(cell)
+	if wall == null:
+		return null
+	if not is_instance_valid(wall) or wall.is_queued_for_deletion():
+		temp_wall_nodes.erase(cell)
+		return null
+	return wall
 
 ## A blast has reached the wall on this cell (see Bomb._apply_blast): it takes a hit,
 ## and only comes down on its last. `breaker` is whoever's bomb it was.
 func hit_temp_wall_at(cell: Vector2i, breaker: Node) -> void:
-	if temp_wall_nodes.has(cell):
-		temp_wall_nodes[cell].hit(breaker)
+	var wall := get_temp_wall(cell)
+	if wall != null:
+		wall.hit(breaker)
 
 # Turns `cell` into permanent stone, clearing whatever was standing on it —
 # used by sudden death, which drops walls on the arena regardless of what's in
@@ -677,8 +699,9 @@ func seal_cell(cell: Vector2i) -> void:
 	# Rubble on a crossing ends it: stop rebuilding a bridge the closing ring
 	# has just filled in, or the repair tick would carve the wall back open.
 	bridges.erase(cell)
-	if temp_wall_nodes.has(cell):
-		temp_wall_nodes[cell].destroy()
+	var wall := get_temp_wall(cell)
+	if wall != null:
+		wall.destroy()
 	if blocks_by_cell.has(cell):
 		blocks_by_cell[cell].destroy()
 		blocks_by_cell.erase(cell)

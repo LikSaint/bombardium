@@ -1083,10 +1083,11 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 	# current_cell has to be scanned for enemies like any other blast cell — an
 	# enemy standing right on top of the bot is its best shot, not a blind spot.
 	# A block there is impossible, since blocks aren't walkable.
+	var turret_cells := _bot_turret_cells()
 	for c in own_blast:
 		if _enemy_at(c) != null:
 			targets_enemy = true
-		elif arena.is_block(c):
+		elif arena.is_block(c) or _bot_breakable_obstacle(c, turret_cells):
 			targets_block = true
 	if not targets_enemy and not targets_block:
 		return false
@@ -1256,12 +1257,39 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 					return true
 			return false
 		, unsafe)
+	# Nobody to reach and no crate left to farm: what is in the way is somebody else's
+	# wall or a turret — the Engineer's walls are solid to everyone but them, and a
+	# turret cell is never a way through — so go and stand next to it and bomb it.
+	# Without this the bot found nothing to walk to, fell through to the random step
+	# below and drifted about beside the very thing keeping it from the fight.
+	if path.is_empty():
+		var turret_cells := _bot_turret_cells()
+		path = _bfs_find(current_cell, func(c):
+			for dir in Consts.DIRECTIONS:
+				if _bot_breakable_obstacle(c + dir, turret_cells):
+					return true
+			return false
+		, unsafe)
 	if path.size() >= 2:
 		bot_move_dir = path[1] - path[0]
 	elif path.size() == 1:
 		bot_move_dir = Vector2i.ZERO
 	else:
 		bot_move_dir = _bot_random_safe_dir(danger, hazard)
+
+## Cells holding a crate-hazard turret right now.
+func _bot_turret_cells() -> Dictionary:
+	var cells := {}
+	for t in get_tree().get_nodes_in_group("turrets"):
+		cells[t.cell] = true
+	return cells
+
+## Something a bomb can clear out of a bot's way that is not a crate: a wall somebody
+## else built (a bot's own never gets in its way — it walks through it) or a turret.
+func _bot_breakable_obstacle(c: Vector2i, turret_cells: Dictionary) -> bool:
+	if arena.is_temp_wall(c):
+		return arena.temp_wall_cells.get(c) != self
+	return turret_cells.has(c)
 
 ## Sapper trigger, bot side. Fires when an enemy is standing in the blast of a
 ## bomb this bot has out, or — once it's safely clear — when there's nothing
