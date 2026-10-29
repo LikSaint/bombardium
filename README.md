@@ -673,6 +673,32 @@ explodes when caught in someone else's blast, is designed but not built — see
   The Deck presents as an Xbox-style pad, so `Pad.family()` picks the A/B/X/Y glyphs automatically. On a
   Deck, copy the file over, `chmod +x` it and add it as a non-Steam game. No Windows preset yet.
 
+## Logging
+
+`Log` (autoload, `scripts/Log.gd`) writes one file, `user://logs/bombardium.log` — on a Steam Deck
+`~/.local/share/godot/app_userdata/Bombardium/logs/bombardium.log`, on macOS
+`~/Library/Application Support/Godot/app_userdata/Bombardium/logs/`. A bug report is that one file.
+
+- Every line is **flushed as it is written**. Godot's own log is buffered and came back empty after
+  a native crash; here the last line is the last thing that happened.
+- It also folds in `print()`, `push_error()` and every engine/script error with its backtrace
+  (`[ENGINE]`, `[PRINT]`, `[STDERR]`), so nothing is split across two files.
+- Sessions follow each other in the file, each opened by a header (build time, engine, OS, GPU,
+  pads) and closed by `=== SESSION END ===`. A session with no end line is one that was killed: the
+  next start logs `the previous session did not end cleanly`. The file is capped at 2 MB, oldest
+  sessions dropped first.
+- Lines: `13:27:26.123 +0412.8s f=24711 [TAG] message` — wall clock, seconds since start, frame, tag.
+  Tags: `SESSION APP PAD BEAT` (a heartbeat every 10 s with fps, node/object counts and memory),
+  `LOBBY MATCH ROUND ARENA SPAWN` (setup and round flow), `BOMB HIT DEATH POWERUP` (the fight),
+  `WALL BRIDGE HAZARD` (terrain and crate hazards), `JOIN` (mid-match joins).
+- To log something new: `Log.info("TAG", "...")`, `Log.warn`, `Log.error`; `Log.who_node(player)` and
+  `Log.cell(c)` give the usual "p2 PYRO bot" / "(5, 3)" shapes.
+- **Exported builds crash where the editor only errors**: calling a method on a freed object is a
+  script error in the editor ("previously freed") and a segfault in a release export. Anything that
+  keeps nodes in a dictionary has to check `is_instance_valid` (see `Arena.get_temp_wall`).
+  A crash leaves a core dump on the Deck: `coredumpctl list`, and the kernel log shows
+  `Bombardium.x86_64: segfault at … ip …`.
+
 ## Known simplifications / not yet done
 
 - Pyro's circle blast doesn't respect line-of-sight occlusion (a block inside the radius doesn't

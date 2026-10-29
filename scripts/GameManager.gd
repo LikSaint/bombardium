@@ -42,6 +42,7 @@ func _on_joy_connection_changed(device: int, connected: bool) -> void:
 		return
 	for slot in player_slots:
 		if slot["device"] == device:
+			Log.warn("MATCH", "pad %d dropped out mid-match: %s is a bot now" % [device, Log.who(slot["id"], slot["character_id"], device)])
 			slot["device"] = Consts.DEVICE_BOT
 			player_disconnected.emit(slot["id"])
 			return
@@ -70,10 +71,12 @@ func join_round(id: int) -> bool:
 		scores[id] = 0
 	if not alive_players.has(id):
 		alive_players.append(id)
+	Log.info("MATCH", "p%d joined mid-round" % id)
 	return true
 
 func start_round(player_ids: Array[int]) -> void:
 	round_number += 1
+	Log.info("ROUND", "round %d/%d starts with players %s" % [round_number, rounds_per_match, player_ids])
 	round_over = false
 	alive_players = player_ids.duplicate()
 	for id in player_ids:
@@ -90,6 +93,7 @@ func player_died(id: int) -> void:
 	if not alive_players.has(id):
 		return
 	alive_players.erase(id)
+	Log.info("MATCH", "p%d out; alive now %s%s" % [id, alive_players, " (round already over)" if round_over else ""])
 	if not round_over:
 		_check_round_end.call_deferred()
 
@@ -100,8 +104,10 @@ func _check_round_end() -> void:
 	if alive_players.size() == 1:
 		var winner: int = alive_players[0]
 		scores[winner] += 1
+		Log.info("ROUND", "round %d/%d ended: p%d wins; scores %s" % [round_number, rounds_per_match, winner, scores])
 		round_ended.emit(winner)
 	else:
+		Log.info("ROUND", "round %d/%d ended: draw; scores %s" % [round_number, rounds_per_match, scores])
 		round_ended.emit(-1)
 
 func is_match_over() -> bool:
@@ -117,11 +123,13 @@ func get_match_winner() -> int:
 	return best_id
 
 func reset_match() -> void:
+	Log.info("MATCH", "new match: %d rounds" % Consts.rounds_per_match())
 	round_number = 0
 	scores.clear()
 	rounds_per_match = Consts.rounds_per_match()
 
 func leave_to_lobby() -> void:
+	Log.info("MATCH", "back to the lobby")
 	player_slots = []
 	alive_players = []
 	scores = {}

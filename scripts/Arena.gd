@@ -286,7 +286,9 @@ func break_bridge_at(cell: Vector2i) -> void:
 		# before the cell becomes water.
 		var wall := get_temp_wall(cell)
 		if wall != null:
+			Log.info("WALL", "wall at %s goes down with the bridge" % Log.cell(cell))
 			wall.destroy()
+		Log.info("BRIDGE", "broken at %s" % Log.cell(cell))
 		cells[cell] = CellState.CHASM
 		Sfx.play("wall_destroy")
 		# Whatever was standing on the planks goes into the water with them. A
@@ -517,6 +519,7 @@ func _spawn_saw(cell: Vector2i) -> void:
 	saw.cell = cell
 	saw.arena = self
 	saw.position = cell_to_world(cell)
+	Log.info("HAZARD", "saw at %s" % Log.cell(cell))
 	add_child(saw)
 	Sfx.play("wall_destroy", 0.5)
 
@@ -525,6 +528,7 @@ func _spawn_gas_cloud(cell: Vector2i) -> void:
 	cloud.origin_cell = cell
 	cloud.arena = self
 	cloud.position = cell_to_world(cell)
+	Log.info("HAZARD", "gas cloud at %s" % Log.cell(cell))
 	add_child(cloud)
 	Sfx.play("wall_destroy", 0.3)
 
@@ -533,6 +537,7 @@ func _spawn_turret(cell: Vector2i) -> void:
 	turret.cell = cell
 	turret.arena = self
 	turret.position = cell_to_world(cell)
+	Log.info("HAZARD", "turret at %s" % Log.cell(cell))
 	add_child(turret)
 	Sfx.play("wall_destroy", 0.6)
 
@@ -602,6 +607,7 @@ func try_collect_powerup(cell: Vector2i, player: Node) -> void:
 		return
 	var type: int = powerups_by_cell[cell].type
 	var cursed: bool = powerups_by_cell[cell].is_cursed
+	Log.info("POWERUP", "%s picked up type %d%s at %s" % [Log.who_node(player), type, " (cursed)" if cursed else "", Log.cell(cell)])
 	powerups_by_cell[cell].queue_free()
 	powerups_by_cell.erase(cell)
 	if cursed:
@@ -643,6 +649,7 @@ func place_temp_wall(cell: Vector2i, owner: Node = null, level: int = 1) -> Node
 	cells[cell] = CellState.WALL
 	temp_wall_cells[cell] = owner
 	temp_wall_nodes[cell] = wall
+	Log.info("WALL", "%s built level %d at %s" % [Log.who_node(owner), level, Log.cell(cell)])
 	if owner != null:
 		wall.modulate = Color.WHITE.lerp(Consts.PLAYER_COLORS[(owner.player_id - 1) % Consts.PLAYER_COLORS.size()], TEMP_WALL_OWNER_TINT_STRENGTH)
 	queue_redraw()
@@ -679,6 +686,8 @@ func get_temp_wall(cell: Vector2i) -> Node:
 	if wall == null:
 		return null
 	if not is_instance_valid(wall) or wall.is_queued_for_deletion():
+		if not is_instance_valid(wall):
+			Log.warn("WALL", "stale wall entry at %s dropped (the node was already freed)" % Log.cell(cell))
 		temp_wall_nodes.erase(cell)
 		return null
 	return wall

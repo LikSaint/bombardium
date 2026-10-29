@@ -28,4 +28,5 @@ func _physics_process(_delta: float) -> void:
 		var damage_chance = 1.0 - (dist / max_damage_dist)
 		if randf() < damage_chance:
 			hit_players[player] = true
+			Log.info("HIT", "%s by a blast of %s (blast cell %s)" % [Log.who_node(player), Log.who_node(owner_player) if owner_player != null else "a turret", Log.cell(Vector2i(int(position.x / Consts.CELL_SIZE), int(position.y / Consts.CELL_SIZE)))])
 			player.die()

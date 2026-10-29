@@ -93,6 +93,7 @@ func _ghost_alpha(progress: float) -> float:
 	return peak * sin(local * PI)
 
 func _start() -> void:
+	Log.info("ROUND", "sudden death begins")
 	_cells = _build_spiral()
 	_running = true
 	_advance()

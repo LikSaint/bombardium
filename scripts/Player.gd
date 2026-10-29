@@ -1846,6 +1846,9 @@ func _commit_ordnance(bomb: Node, at_cell: Vector2i, world_pos: Vector2) -> void
 	bomb.arena = arena
 	bomb.owner_player = self
 	bomb.position = world_pos
+	Log.info("BOMB", "%s %s at %s radius=%d%s" % [
+		Log.who_node(self), "mine" if bomb.is_mine else ("shell" if bomb.thrown else "bomb"),
+		Log.cell(at_cell), bomb.radius, " star" if bomb.is_star_blast else ""])
 	arena.add_child(bomb)
 	bomb.exploded.connect(_on_owned_bomb_exploded.bind(bomb))
 	live_bombs.append(bomb)
@@ -2564,6 +2567,7 @@ func pickup_weapon() -> void:
 	pass # TODO: weapon pickup (MVP phase 5)
 
 func apply_powerup(type: int) -> void:
+	Log.info("POWERUP", "%s takes type %d" % [Log.who_node(self), type])
 	match type:
 		Consts.PowerupType.BOMB_COUNT:
 			bomb_level += 1
@@ -2592,6 +2596,7 @@ func apply_powerup(type: int) -> void:
 ## _effective_* readers and the _base_* fields above), so there's nothing to
 ## restore and nothing a run of bad luck can leave worse than where it found you.
 func apply_curse(type: int) -> void:
+	Log.info("POWERUP", "%s is cursed (type %d)" % [Log.who_node(self), type])
 	var now := Time.get_ticks_msec() / 1000.0
 	match type:
 		Consts.PowerupType.BOMB_COUNT:
@@ -2708,6 +2713,8 @@ func _kill() -> void:
 		_shield_overlay.queue_free()
 		_shield_overlay = null
 	alive = false
+	Log.info("DEATH", "%s at %s (bomb_radius=%d bombs=%d speed=%d)" % [
+		Log.who_node(self), Log.cell(get_current_cell()), bomb_radius, bomb_level, speed_level])
 	$Portrait.set_walking(false)
 	_play_death_animation()
 	Sfx.play("player_death")

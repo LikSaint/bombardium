@@ -345,6 +345,7 @@ func _join_device(device: int) -> bool:
 		slots[bot]["device"] = device
 		slots[bot]["ready"] = false
 	_cancel_countdown()
+	Log.info("LOBBY", "device %d joined (slots now %d)" % [device, slots.size()])
 	Sfx.play_menu()
 	_refresh_slots_ui()
 	return true
@@ -362,6 +363,7 @@ func _toggle_join_or_ready(device: int) -> void:
 			return
 	else:
 		slot["ready"] = not slot["ready"]
+		Log.info("LOBBY", "%s is %s" % [Log.who(slot["player_id"], slot["character_id"], slot["device"]), "ready" if slot["ready"] else "not ready"])
 		if not slot["ready"]:
 			_cancel_countdown()
 		Sfx.play_menu()
@@ -430,6 +432,10 @@ func _begin_match() -> void:
 			"device": slot["device"],
 			"character_id": slot["character_id"],
 		})
+	var summary: Array[String] = []
+	for slot in player_slots:
+		summary.append(Log.who(slot["id"], slot["character_id"], slot["device"]))
+	Log.info("LOBBY", "match starts: %s" % ", ".join(summary))
 	GameManager.set_player_slots(player_slots)
 	GameManager.reset_match()
 	get_tree().change_scene_to_file(MainScenePath)

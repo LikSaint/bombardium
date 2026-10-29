@@ -408,6 +408,8 @@ func explode() -> void:
 ## touch, and neither can drift from what _blast_cells tells a mine it covers.
 func _apply_blast() -> void:
 	var cells := _blast_cells()
+	Log.info("BOMB", "exploded at %s radius=%d cells=%d%s owner=%s" % [
+		Log.cell(cell), radius, cells.size(), " mine" if is_mine else (" shell" if thrown else ""), Log.who_node(owner_player)])
 	for c in cells:
 		_spawn_explosion(c)
 		if arena.is_temp_wall(c):

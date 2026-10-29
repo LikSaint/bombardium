@@ -55,6 +55,10 @@ func _ready() -> void:
 		return
 	Music.play_track(Music.Track.ARENA)
 	arena.generate()
+	Log.info("ARENA", "generated: layout=%s size=%dx%d random_walls=%s powerups=%d%% hazards=%d%% sudden_death=%s" % [
+		Consts.layout_name_for_id(arena.layout_id), Consts.GRID_WIDTH, Consts.GRID_HEIGHT,
+		Consts.random_indestructible_walls, Consts.powerup_chance_percent, Consts.hazard_chance_percent,
+		Consts.SUDDEN_DEATH_LABELS[Consts.sudden_death_index]])
 	GameManager.round_ended.connect(_on_round_ended)
 	# Spawning first: it binds the HUD corners, and which of them are on screen
 	# decides how much room the arena gets (see _frame_arena).
@@ -374,6 +378,7 @@ func join_slot(device: int, slot_index: int) -> bool:
 	if slot_index == _free_slot_index():
 		return _join_free_slot(device)
 	if slot_index >= 0 and slot_index < slots.size() and slots[slot_index]["device"] == Consts.DEVICE_BOT:
+		Log.info("JOIN", "device %d takes over the bot at slot %d (%s)" % [device, slot_index, Log.who(slots[slot_index]["id"], slots[slot_index]["character_id"], device)])
 		slots[slot_index]["device"] = device
 		GameManager.player_reconnected.emit(slots[slot_index]["id"], device)
 		return true
@@ -387,6 +392,7 @@ func _join_free_slot(device: int) -> bool:
 	var slot := {"id": index + 1, "device": device, "character_id": randi() % Consts.CHARACTER_COUNT}
 	if not GameManager.join_round(slot["id"]):
 		return false
+	Log.info("JOIN", "%s joins the free slot %d at %s" % [Log.who(slot["id"], slot["character_id"], device), index, Log.cell(cell)])
 	GameManager.player_slots.append(slot)
 	var p := PlayerScene.instantiate()
 	p.player_id = slot["id"]
@@ -417,6 +423,7 @@ func _spawn_players() -> void:
 		if i < hud_corners.size():
 			hud_corners[i].bind(p)
 		player_ids.append(slot["id"])
+		Log.info("SPAWN", "%s at %s" % [Log.who(slot["id"], slot["character_id"], slot["device"]), Log.cell(spawn_cells[i])])
 
 	GameManager.start_round(player_ids)
 
@@ -568,6 +575,7 @@ func _on_round_ended(winner_id: int) -> void:
 		await get_tree().create_timer(1.0).timeout
 
 	overlay.visible = false
+	Log.info("ROUND", "reloading the arena for the next round")
 	get_tree().reload_current_scene()
 
 func _has_human_player() -> bool:

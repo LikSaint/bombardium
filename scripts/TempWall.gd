@@ -127,6 +127,7 @@ func _on_timer_timeout() -> void:
 	destroy()
 
 func destroy() -> void:
+	Log.info("WALL", "%s at %s destroyed (level %d)" % ["turret" if is_turret else "wall", Log.cell(cell), level])
 	Sfx.play("wall_destroy")
 	# A turret holds one of its owner's bomb charges for as long as it stands; the
 	# charge comes back with it, however it went.
@@ -140,6 +141,7 @@ func destroy() -> void:
 ## once; the caller pays the bomb charge (see Player._finish_turret_upgrade).
 func make_turret(owner_player: Node) -> void:
 	is_turret = true
+	Log.info("WALL", "%s turns the wall at %s into a turret" % [Log.who_node(owner_player), Log.cell(cell)])
 	hp = 1 + TURRET_SHIELDS
 	turret_owner = owner_player
 	_fire_clock = 0.0
