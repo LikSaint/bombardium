@@ -28,11 +28,11 @@ const STRINGS := {
 		"CHAR_NAME_GRENADIER": "Гранатомётчик",
 
 		"CHAR_DESC_BOMB_MASTER": "Очень длинный фитиль — можно подорвать в любой момент кнопкой (%s)",
-		"CHAR_DESC_SCOUT": "Самый быстрый; двойное нажатие в сторону — прыжок через любые препятствия",
-		"CHAR_DESC_ENGINEER": "%s: Поставить стену, через которую проходит только сам. Стен — сколько бомб",
+		"CHAR_DESC_SCOUT": "Самый быстрый; двойное нажатие в сторону — прыжок через препятствия, в прыжке неуязвим",
+		"CHAR_DESC_ENGINEER": "%s: строить стены и улучшать их вплоть до турелей",
 		"CHAR_DESC_PYRO": "Взрыв по диагонали, пробивает ящики. Не боится своих бомб",
 		"CHAR_DESC_BOMB_KICKER": "Пинает бомбы на ходу. %s: засесть в обороне — удар не убьёт, но выбьет из неё",
-		"CHAR_DESC_MAGNET": "Его бомбы сами ползут к ближайшему сопернику — медленно, но неотвязно",
+		"CHAR_DESC_MAGNET": "Его бомбы сами ползут к ближайшему сопернику; бонусы скорости ускоряют и их",
 		"CHAR_DESC_MINER": "%s: Часть бомб ставит невидимыми минами — они рвутся у врага под ногами",
 		"CHAR_DESC_GRENADIER": "%s: метнуть гранату по воздуху",
 
@@ -111,11 +111,11 @@ const STRINGS := {
 		"CHAR_NAME_GRENADIER": "Grenadier",
 
 		"CHAR_DESC_BOMB_MASTER": "Very long fuse — set them off whenever you like with the button (%s)",
-		"CHAR_DESC_SCOUT": "Fastest on their feet; double-tap a direction to hop over any obstacle",
-		"CHAR_DESC_ENGINEER": "%s: Place a wall only they can pass through. One wall per bomb",
+		"CHAR_DESC_SCOUT": "Fastest on their feet; double-tap a direction to hop over obstacles — nothing hurts in the air",
+		"CHAR_DESC_ENGINEER": "%s: build walls and upgrade them all the way to turrets",
 		"CHAR_DESC_PYRO": "Diagonal blast, pierces crates. Immune to its own bombs",
 		"CHAR_DESC_BOMB_KICKER": "Kicks bombs as it walks. %s: dig in — one hit won't kill, but breaks the stance",
-		"CHAR_DESC_MAGNET": "Their bombs crawl toward the nearest opponent on their own — slowly, but they don't let go",
+		"CHAR_DESC_MAGNET": "Their bombs crawl toward the nearest opponent on their own; speed powerups speed them up too",
 		"CHAR_DESC_MINER": "%s: Spends some bombs as invisible mines — they go off under an opponent's feet",
 		"CHAR_DESC_GRENADIER": "%s: lob a grenade through the air",
 

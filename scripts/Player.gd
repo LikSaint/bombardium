@@ -66,6 +66,54 @@ var _sprint_dir: Vector2i = Vector2i.ZERO
 const KICK_BASE_DISTANCE := 2
 var kick_distance: int = KICK_BASE_DISTANCE
 
+# --- Engineer: building ----------------------------------------------------
+#
+# The ability button builds on the cell in front of the Engineer (the way they face),
+# and it is a hold, not a press:
+#
+#   * The first build is immediate — a wall of level 1, which is what a tap has always
+#     been. Walls are capped at the Engineer's bomb count, as before.
+#   * Held, it builds again every BUILD_TICK seconds, and a wall's level is how many
+#     ticks in a row, in this one hold, the build has been aimed at its cell: the first
+#     tick makes a level-1 wall, the second brings it to level 2, the third to level 3.
+#     A level is the number of blasts it takes to bring the wall down.
+#   * Nothing carries over from an earlier hold: a wall that is already there, built on
+#     again, is still level 1 at the first tick, and a level-2 wall still has to be stood
+#     over for all three to become level 3 — the ticks are what the level is made of, not
+#     the wall's history.
+#   * While building the Engineer stands still, but the direction keys aim: they turn to
+#     face a different neighbour, and from the next tick the building goes on there, with
+#     the count of ticks starting again at one.
+#   * On water it builds a bridge, and on a bridge that was blown it finishes the repair —
+#     either at once, no levels (Arena.build_bridge_at).
+#   * The last step, a mini-turret, is built the same way and on the same button, in front,
+#     but slowly: aimed at an undamaged level-3 wall of their own, the hold stops counting
+#     ticks and runs for TURRET_UPGRADE_TIME instead, a ghost of the turret filling in on
+#     the wall as it goes. Held straight through from nothing, that is level 3 at 1.6s and
+#     the turret 3s after. The bomb button stays an ordinary bomb.
+#
+# While held, the target cell is outlined and a dial at the feet fills towards the next
+# build, the same dial the Grenadier's charge uses.
+const BUILD_TICK := 0.8
+## How long the button is held, inside a level-3 wall, to turn it into a turret — longer on
+## purpose than a whole climb from nothing to level 3 (1.6s), since it costs a bomb for as
+## long as the turret lives.
+const TURRET_UPGRADE_TIME := 3.0
+enum BuildPlan { NOTHING, WALL, UPGRADE, BRIDGE }
+var _building: bool = false
+var _build_clock: float = 0.0
+## How many ticks, in the hold in progress, have been aimed at _build_cell — what the next
+## tick's level is made of. Starts again at zero whenever the aim moves or the button comes up.
+var _build_progress: int = 0
+var _build_cell: Vector2i = Vector2i(-1, -1)
+## The hold aimed at a wall that could become a turret: _upgrade_clock runs from 0 to
+## TURRET_UPGRADE_TIME, and restarts if the aim moves to another wall (_upgrade_cell).
+var _upgrade_clock: float = 0.0
+var _upgrade_cell: Vector2i = Vector2i(-1, -1)
+var _upgrade_wall: Node = null
+const BUILD_COLOR := Color(0.45, 0.85, 0.5)
+const BUILD_BLOCKED_COLOR := Color(1.0, 0.3, 0.25)
+
 # --- Hockey Player: digging in ---------------------------------------------
 #
 # The ability button sits the Hockey Player down in a defensive stance: they crouch,
@@ -230,7 +278,11 @@ const BOT_GRENADE_GAP := 0.8
 var _bot_grenade_ready_at: float = 0.0
 const BOT_GRENADE_MIN_BLOCKS := 2
 
-var move_duration: float = 0.3
+## Seconds per cell for a character with no speed bonus of any kind. What a
+## character's own move_duration is measured against — the Magnet's bombs read the ratio
+## (see Bomb._magnet_speed_factor).
+const BASE_MOVE_DURATION := 0.3
+var move_duration: float = BASE_MOVE_DURATION
 var bomb_count_max: int = 1
 var bomb_count_current: int = 1
 var bomb_radius: int = 1
@@ -356,10 +408,10 @@ func _ready() -> void:
 func _apply_character_passives() -> void:
 	match character_id:
 		CharacterId.BOMB_MASTER:
+			shield_charges += 1
 			bomb_count_max += 1
 			bomb_count_current = bomb_count_max
 			bomb_level += 1
-			shield_charges += 1
 			# BOMB_COUNT: the trigger sets off every bomb at once, so bombs are
 			# what scales the Sapper — three at a time is a shaped minefield,
 			# one is just a bomb with better timing.
@@ -369,21 +421,21 @@ func _apply_character_passives() -> void:
 			# Hockey Player (same speed, no shield, no kick), and the hop alone
 			# didn't cover the gap. Speed is the whole identity, so it's the
 			# thing to lean into.
+			shield_charges += 1
 			move_duration *= 0.8
 			speed_level += 2
-			shield_charges += 1
 			powerup_weights = [1, 1, 3, 1]  # SPEED
 		CharacterId.ENGINEER:
-			# The wall cap is the bomb count (see _ability_temp_wall), so the
+			# The wall cap is the bomb count (see _build_plan), so the
 			# extra bomb is also an extra wall — and it's what makes the
 			# Engineer's actual combo (bomb an opponent, wall off their escape)
 			# possible at all, which a single bomb never was.
+			shield_charges += 1
 			bomb_count_max += 1
 			bomb_count_current = bomb_count_max
 			bomb_level += 1
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — every bomb is another wall
 		CharacterId.PYRO:
-			shield_charges += 1
 			# RADIUS: a step buys the Pyro six cells of blast where it buys anyone
 			# else four, and it is also what pays for cover — the arms only start
 			# coming through crates at radius 3 and through stone at radius 5 (see
@@ -396,12 +448,13 @@ func _apply_character_passives() -> void:
 			# linear now (Arena._star_blast_cells), so the weights are merely a
 			# preference again rather than a runaway — but they and the 1.5x are
 			# still the two knobs if the Pyro out-scales the field.
+			shield_charges += 1
 			powerup_weights = [1, 3, 1, 1]
 			powerup_chance_multiplier = 1.5  # 50% more total powerup chance
 		CharacterId.BOMB_KICKER:
+			shield_charges += 1
 			move_duration *= 0.9
 			speed_level += 1
-			shield_charges += 1
 			ability_cooldown = DEFENSE_COOLDOWN
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — more bombs, more pucks
 		CharacterId.MAGNET:
@@ -412,15 +465,16 @@ func _apply_character_passives() -> void:
 			# is the concession to the Magnet living inside their own minefield:
 			# their bombs move, so unlike everyone else they can be caught out by
 			# ammunition they placed somewhere that was safe at the time.
+			shield_charges += 1
 			bomb_count_max += 1
 			bomb_count_current = bomb_count_max
 			bomb_level += 1
-			shield_charges += 1
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — every bomb is another hunter
 		CharacterId.MINER:
 			# The extra charge is what makes the character playable at all: mines
 			# and bombs share one pool, so at a single charge every mine planted
 			# is a round spent unable to break a crate or answer anyone.
+			shield_charges += 1
 			bomb_count_max += 1
 			bomb_count_current = bomb_count_max
 			bomb_level += 1
@@ -429,7 +483,6 @@ func _apply_character_passives() -> void:
 			# Mines come out at the full radius of an ordinary bomb, so a radius
 			# step needs no extra weight to be worth having.
 			powerup_weights = [3, 1, 1, 1]
-			shield_charges += 1
 		CharacterId.GRENADIER:
 			# The launcher is on the ability button and an ordinary bomb on the bomb
 			# button, out of one pool of charges: a shell in the air and a bomb on
@@ -438,10 +491,10 @@ func _apply_character_passives() -> void:
 			# away from — and bomb pickups grow it, like they do for everyone. The
 			# shield is the concession to a kit whose whole threat has to be walked
 			# into range to use: at base speed there is no getting back out again.
+			shield_charges += 1
 			bomb_count_max = GRENADE_START_SHELLS
 			bomb_count_current = bomb_count_max
 			bomb_level += GRENADE_START_SHELLS - 1
-			shield_charges += 1
 			ability_cooldown = _grenade_cooldown()
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — more shells, and a shorter cooldown
 	stats_changed.emit()
@@ -471,6 +524,7 @@ func _on_player_disconnected(p_id: int) -> void:
 	device_id = Consts.DEVICE_BOT
 	is_bot = true
 	_cancel_charge()
+	_end_build()
 
 func _input(event: InputEvent) -> void:
 	if not alive:
@@ -520,6 +574,12 @@ func _ability_input(pressed: bool) -> void:
 	if character_id == CharacterId.GRENADIER:
 		_charge_input(pressed)
 		return
+	if character_id == CharacterId.ENGINEER:
+		if pressed:
+			_begin_build()
+		else:
+			_end_build()
+		return
 	if pressed:
 		use_ability()
 
@@ -562,6 +622,21 @@ func _physics_process(delta: float) -> void:
 	# with the shot already loaded, and the one tell anybody gets (the dial at
 	# their feet) would be attached to a moving target.
 	if _charge_time >= 0.0:
+		_sprint_charge = 0.0
+		$Portrait.set_walking(false)
+		return
+
+	# Building: the feet are planted, but the direction keys still turn them (above),
+	# and turning is how the target cell is aimed.
+	if _building:
+		# Aimed at a wall that could become a turret, the hold runs that clock instead of
+		# the build ticks; aimed anywhere else (or once a blast has hit the wall, or the spare
+		# bomb is gone) it is the ordinary build again.
+		if not _turret_hold_step(delta):
+			_build_clock += delta
+			if _build_clock >= BUILD_TICK:
+				_build_clock -= BUILD_TICK
+				_build_tick()
 		_sprint_charge = 0.0
 		$Portrait.set_walking(false)
 		return
@@ -722,7 +797,7 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 	facing_dir = dir
 	$Portrait.face(dir)
 	Sfx.play("jump")
-	_scripted_move_to(arena.cell_to_world(target_cell), move_duration)
+	_scripted_move_to(arena.cell_to_world(target_cell), move_duration, true)
 
 ## Only actually moves once per decision (returns the chosen dir exactly the
 ## frame it's decided, Vector2i.ZERO every other frame) so the bot visibly
@@ -1234,7 +1309,7 @@ func _bot_try_detonate() -> void:
 ## a bot that dumps its whole allowance into two neighbouring cells of the same
 ## corridor has blocked exactly one route twice.
 func _bot_try_wall(danger: Dictionary) -> void:
-	if ability_on_cooldown or active_temp_walls.size() >= bomb_count_max:
+	if active_temp_walls.size() >= bomb_count_max:
 		return
 	var current_cell := get_current_cell()
 	if danger.has(current_cell) or arena.has_bomb_at(current_cell):
@@ -1248,7 +1323,13 @@ func _bot_try_wall(danger: Dictionary) -> void:
 	# whatever this wall would have blocked.
 	if to_enemy.size() < 2 or to_enemy.size() - 1 > BOT_WALL_ENEMY_RANGE:
 		return
-	use_ability()
+	# The wall goes on the cell the enemy would step onto next, which is the one in
+	# front once the bot has turned to it. A tap: level 1, as before.
+	var step: Vector2i = to_enemy[1] - current_cell
+	facing_dir = step
+	$Portrait.face(step)
+	_build_cell = Vector2i(-1, -1) # a bot never holds: every build is the first tick
+	_build_tick()
 
 ## Miner mines, bot side. A mine is the opposite ask to a wall: a wall wants a
 ## gap nobody can get round, a mine wants ground somebody will actually cross,
@@ -1628,14 +1709,36 @@ func _release_cleared_bombs() -> void:
 
 ## Tween-driven hop/shove: takes `position` away from input handling for its
 ## duration so the two can't fight over the transform.
-func _scripted_move_to(target_pos: Vector2, duration: float) -> void:
+##
+## `airborne` is the Parkour Runner's hop: nothing can hurt them while they are in the
+## air (see die()) — the whole point of a hop over a bomb is that the blast goes under
+## them — and for a moment after, JUMP_LANDING_GRACE, so a blast that ends the instant they
+## come down does not catch them on the landing frame. The portrait lifts in an arc so it
+## reads as a jump rather than a slide.
+func _scripted_move_to(target_pos: Vector2, duration: float, airborne: bool = false) -> void:
 	_scripted_move = true
+	if airborne:
+		_airborne = true
+		_jump_arc(duration)
 	var tw := create_tween()
 	tw.tween_property(self, "position", target_pos, duration)
 	tw.finished.connect(func():
 		_scripted_move = false
 		$Portrait.set_walking(false)
+		if airborne:
+			get_tree().create_timer(JUMP_LANDING_GRACE).timeout.connect(func(): _airborne = false)
 	)
+
+const JUMP_LANDING_GRACE := 0.1
+const JUMP_ARC_HEIGHT := 18.0
+var _airborne: bool = false
+
+func _jump_arc(duration: float) -> void:
+	var portrait: Node2D = $Portrait
+	var rest_y: float = portrait.position.y
+	var tw := create_tween()
+	tw.tween_property(portrait, "position:y", rest_y - JUMP_ARC_HEIGHT, duration * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(portrait, "position:y", rest_y, duration * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 ## bomb_count_current, capped at this character's own starting bomb capacity
 ## while a BOMB_COUNT curse (see apply_curse) is running. Capped, not zeroed —
@@ -1853,7 +1956,7 @@ func _process(delta: float) -> void:
 		_shield_fade = maxf(0.0, _shield_fade - delta / SHIELD_FADE_TIME)
 	if _shield_overlay != null and (_defending or _shield_fade > 0.0):
 		_shield_overlay.queue_redraw()
-	if _charge_time >= 0.0 or (_has_cooldown_dial() and ability_on_cooldown):
+	if _charge_time >= 0.0 or _building or (_has_cooldown_dial() and ability_on_cooldown):
 		queue_redraw()
 
 const CHARGE_RING_RADIUS := 26.0
@@ -1883,6 +1986,11 @@ const COOLDOWN_DIAL_COLOR := Color(0.85, 0.2, 0.16, 0.7)
 ## so the direction and the colour together say which of the two you are looking
 ## at without having to read any of it.
 func _draw() -> void:
+	if _building:
+		if _upgrade_wall != null:
+			_draw_turret_upgrade()
+		else:
+			_draw_build_preview()
 	if _charge_time >= 0.0:
 		_draw_shot_preview()
 		_draw_charge_dial()
@@ -1918,6 +2026,61 @@ func _draw_shot_preview() -> void:
 	draw_dashed_line(CHARGE_RING_CENTRE, centre, Color(colour, 0.6), 2.0, 8.0)
 	draw_rect(Rect2(centre - half, Vector2(cell_px, cell_px)).grow(-2.0), Color(colour, 0.95), false, 3.0)
 	draw_circle(centre, 4.0, Color(colour, 0.95))
+
+## The cell a build is aimed at, outlined — green when something would be built there
+## on the next tick, red when nothing would — with pips for the level the wall there is
+## at (filled) and the one it is about to be (hollow), and a dial at the feet filling
+## towards that next tick.
+func _draw_build_preview() -> void:
+	if arena == null:
+		return
+	var target := _build_target()
+	var plan := _build_plan(target)
+	var colour := BUILD_COLOR if plan != BuildPlan.NOTHING else BUILD_BLOCKED_COLOR
+	var cell_px := float(Consts.CELL_SIZE)
+	var centre: Vector2 = arena.cell_to_world(target) - position
+	var rect := Rect2(centre - Vector2(cell_px, cell_px) / 2.0, Vector2(cell_px, cell_px))
+	draw_rect(rect.grow(-2.0), Color(colour, 0.14))
+	draw_rect(rect.grow(-2.0), Color(colour, 0.95), false, 3.0)
+	# Level pips along the top of the cell.
+	var wall: Node = arena.get_temp_wall(target)
+	var have: int = wall.level if wall != null else 0
+	var next := have
+	if plan == BuildPlan.WALL:
+		next = 1
+	elif plan == BuildPlan.UPGRADE:
+		next = mini(_build_ticks_at(target), 3)
+	for i in 3:
+		var at := centre + Vector2((i - 1) * 12.0, -cell_px * 0.5 + 8.0)
+		if i < have:
+			draw_circle(at, 4.0, Color(colour, 1.0))
+		elif i < next:
+			draw_arc(at, 4.0, 0.0, TAU, 12, Color(colour, 1.0), 2.0)
+		else:
+			draw_circle(at, 2.0, Color(colour, 0.35))
+	# The dial: how far it is to the next build.
+	var fraction := clampf(_build_clock / BUILD_TICK, 0.0, 1.0)
+	draw_circle(CHARGE_RING_CENTRE, CHARGE_RING_RADIUS, CHARGE_RING_TRACK_COLOR)
+	if fraction > 0.0:
+		_draw_dial_slice(-PI / 2.0, TAU * fraction, Color(BUILD_COLOR, 0.8))
+	_draw_dial_rim()
+
+## Turning the wall in front into a turret: the cell is outlined in orange and the dial at
+## the feet fills over TURRET_UPGRADE_TIME — the same dial as every other hold, in a colour that
+## says this one is not an ordinary build. (The ghost of the turret itself is drawn by the wall.)
+func _draw_turret_upgrade() -> void:
+	var cell_px := float(Consts.CELL_SIZE)
+	var centre: Vector2 = arena.cell_to_world(_build_target()) - position
+	var rect := Rect2(centre - Vector2(cell_px, cell_px) / 2.0, Vector2(cell_px, cell_px))
+	draw_rect(rect.grow(-2.0), Color(TURRET_UPGRADE_COLOR, 0.12))
+	draw_rect(rect.grow(-2.0), Color(TURRET_UPGRADE_COLOR, 0.95), false, 3.0)
+	var fraction := clampf(_upgrade_clock / TURRET_UPGRADE_TIME, 0.0, 1.0)
+	draw_circle(CHARGE_RING_CENTRE, CHARGE_RING_RADIUS, CHARGE_RING_TRACK_COLOR)
+	if fraction > 0.0:
+		_draw_dial_slice(-PI / 2.0, TAU * fraction, Color(TURRET_UPGRADE_COLOR, 0.85))
+	_draw_dial_rim()
+
+const TURRET_UPGRADE_COLOR := Color(1.0, 0.6, 0.15)
 
 func _draw_charge_dial() -> void:
 	var low := _grenade_min_range()
@@ -2072,6 +2235,150 @@ func _start_ability_cooldown() -> void:
 		ability_on_cooldown = false
 		queue_redraw())
 
+## The cell a build would go on: the neighbour in front of the Engineer.
+func _build_target() -> Vector2i:
+	return get_current_cell() + facing_dir
+
+## How many ticks the next build would count as at `target`: one more than the ticks
+## already spent on it in this hold, or the first if the aim has moved.
+func _build_ticks_at(target: Vector2i) -> int:
+	return (_build_progress if target == _build_cell else 0) + 1
+
+## What building at the target would do on the next tick: raise one of their own walls to
+## the level that many ticks make, lay a bridge (or finish repairing one), put up a new
+## level-1 wall, or nothing — and the same answer drives both the build and the outline
+## drawn before it.
+func _build_plan(target: Vector2i) -> int:
+	if arena == null or not arena.in_bounds(target):
+		return BuildPlan.NOTHING
+	var wall: Node = arena.get_temp_wall(target)
+	if wall != null:
+		var level_now: int = wall.level
+		if arena.temp_wall_cells.get(target) == self and not wall.is_turret and level_now < mini(_build_ticks_at(target), wall.MAX_LEVEL):
+			return BuildPlan.UPGRADE
+		return BuildPlan.NOTHING
+	if arena.can_build_bridge_at(target):
+		return BuildPlan.BRIDGE
+	if active_temp_walls.size() < bomb_count_max and arena.can_build_wall_at(target):
+		return BuildPlan.WALL
+	return BuildPlan.NOTHING
+
+## One build tick at the cell in front. Returns whether anything was built.
+func _build_tick() -> bool:
+	var target := _build_target()
+	var plan := _build_plan(target)
+	var ticks := _build_ticks_at(target)
+	# Counted whether or not it built anything: standing over a wall that is already as
+	# tall as this tick's level is still time spent on the way to the next one.
+	_build_cell = target
+	_build_progress = ticks
+	match plan:
+		BuildPlan.UPGRADE:
+			var wall: Node = arena.get_temp_wall(target)
+			wall.raise_to(ticks)
+			Sfx.play("wall_place", 0.9 + 0.2 * wall.level)
+			return true
+		BuildPlan.BRIDGE:
+			return arena.build_bridge_at(target, facing_dir)
+		BuildPlan.WALL:
+			var new_wall: Node = arena.place_temp_wall(target, self)
+			if new_wall == null:
+				return false
+			active_temp_walls.append(new_wall)
+			new_wall.tree_exited.connect(func(): active_temp_walls.erase(new_wall))
+			Sfx.play("wall_place")
+			return true
+	return false
+
+## How many turrets the Engineer may have standing at once: half of the bombs they carry,
+## rounded down — one at the starting two, two at four. A turret holds a bomb charge for its
+## whole minute, so this is also what stops them putting their whole arsenal into the walls.
+func turret_limit() -> int:
+	return bomb_count_max / 2
+
+func active_turret_count() -> int:
+	var count := 0
+	for wall in active_temp_walls:
+		if is_instance_valid(wall) and wall.is_turret:
+			count += 1
+	return count
+
+## The wall at `cell` if the Engineer could turn it into a turret right now, or null. Three
+## things have to hold: the wall level 3 and **undamaged** — a turret is built from a wall at
+## full strength, not from the remains of one — the Engineer holding **a bomb to spare**
+## (the turret costs one, and the last one is never spent on it, or they would be left with
+## nothing to defend themselves with), and a **turret to spare** (see turret_limit).
+func _turret_candidate_at(cell: Vector2i) -> Node:
+	if arena == null:
+		return null
+	var wall: Node = arena.get_temp_wall(cell)
+	if wall == null or wall.is_turret or wall.level < wall.MAX_LEVEL or wall.hp < wall.level:
+		return null
+	if arena.temp_wall_cells.get(cell) != self or _effective_bomb_count_current() < 2:
+		return null
+	if active_turret_count() >= turret_limit():
+		return null
+	return wall
+
+## The hold has run its full time: spend the charge and make the turret. The charge stays
+## spent for as long as the turret stands (TempWall gives it back when it goes).
+func _finish_turret_upgrade(cell: Vector2i) -> void:
+	var wall := _turret_candidate_at(cell)
+	if wall == null:
+		return
+	wall.clear_upgrade_progress()
+	bomb_count_current -= 1
+	stats_changed.emit()
+	wall.make_turret(self)
+
+## One frame of a hold aimed at a wall that could become a turret. Returns true if that is
+## what this frame was (so the build ticks do not run): the clock advances, the ghost on the
+## wall fills in, and at the full time the turret is made.
+func _turret_hold_step(delta: float) -> bool:
+	var target := _build_target()
+	var wall := _turret_candidate_at(target)
+	if wall == null:
+		_clear_upgrade_ghost()
+		return false
+	if target != _upgrade_cell:
+		_clear_upgrade_ghost()
+		_upgrade_cell = target
+		_upgrade_clock = 0.0
+	_upgrade_wall = wall
+	_upgrade_clock += delta
+	wall.set_upgrade_progress(clampf(_upgrade_clock / TURRET_UPGRADE_TIME, 0.0, 1.0), Vector2(facing_dir).angle())
+	if _upgrade_clock >= TURRET_UPGRADE_TIME:
+		_finish_turret_upgrade(target)
+		_end_build() # the turret is made; a fresh press builds on
+	return true
+
+func _clear_upgrade_ghost() -> void:
+	if _upgrade_wall != null and is_instance_valid(_upgrade_wall):
+		_upgrade_wall.clear_upgrade_progress()
+	_upgrade_wall = null
+	_upgrade_cell = Vector2i(-1, -1)
+	_upgrade_clock = 0.0
+
+func _begin_build() -> void:
+	if _building or not alive:
+		return
+	_building = true
+	_build_clock = 0.0
+	_build_progress = 0
+	_build_cell = Vector2i(-1, -1)
+	_clear_upgrade_ghost()
+	_build_tick() # the first build is immediate
+	queue_redraw()
+
+func _end_build() -> void:
+	if not _building:
+		return
+	_building = false
+	_clear_upgrade_ghost()
+	_build_progress = 0
+	_build_cell = Vector2i(-1, -1)
+	queue_redraw()
+
 ## Sit down in the defensive stance: crouch, and raise the shield.
 func _enter_defense() -> void:
 	_defending = true
@@ -2135,8 +2442,6 @@ func use_ability() -> void:
 		return
 	var used := false
 	match character_id:
-		CharacterId.ENGINEER:
-			used = _ability_temp_wall()
 		CharacterId.BOMB_MASTER:
 			used = _ability_detonate()
 		CharacterId.MINER:
@@ -2164,17 +2469,6 @@ func use_ability() -> void:
 ## which is the count of *collected upgrades* — it happened to give the same
 ## number only because the Engineer had no starting bomb bonus to be out of
 ## step with, and it silently ignored any bombs granted by a passive.
-func _ability_temp_wall() -> bool:
-	if active_temp_walls.size() >= bomb_count_max:
-		return false
-	var wall: Node = arena.place_temp_wall(get_current_cell(), self)
-	if wall == null:
-		return false
-	active_temp_walls.append(wall)
-	wall.tree_exited.connect(func(): active_temp_walls.erase(wall))
-	Sfx.play("wall_place")
-	return true
-
 ## Sapper trigger: sets off every bomb they currently have out, at once.
 ##
 ## The Sapper's bombs (Bomb.gd's `remote` flag, set in place_bomb() below) run
@@ -2276,6 +2570,18 @@ func _effective_shield_charges() -> int:
 func is_immune_to_own_blast() -> bool:
 	return character_id == CharacterId.PYRO
 
+## Whether this player is inside a wall (or turret) of their own: only the Engineer's walls
+## let their builder stand in them (see Arena.is_walkable_for).
+func is_sheltered() -> bool:
+	return arena != null and arena.temp_wall_cells.get(get_current_cell()) == self
+
+## Unhurtable for a moment, with nothing drawn for it — the invulnerability that follows
+## a hit absorbed by something other than a shield, so the rest of the same blast, which
+## lingers on the cell, cannot land the very next frame.
+func grant_silent_grace(seconds: float) -> void:
+	is_invulnerable = true
+	get_tree().create_timer(seconds).timeout.connect(_end_invulnerability)
+
 const INVULN_DURATION := 1.0
 const INVULN_BLINK_INTERVAL := 0.1
 
@@ -2283,6 +2589,15 @@ var is_invulnerable: bool = false
 
 func die() -> void:
 	if not alive or is_invulnerable:
+		return
+	# Mid-hop (the Parkour Runner): nothing touches them — no damage, no shield spent, no
+	# flash. They just were not there.
+	if _airborne:
+		return
+	# Standing inside a wall of their own (the Engineer's let them through): it is the wall
+	# that is hit — a blast takes a hit off it as it reaches the cell (see Bomb._apply_blast)
+	# — and the person in it takes nothing.
+	if is_sheltered():
 		return
 	# Dug in: the hit is absorbed, costs nothing — not even a shield charge — and
 	# throws the Hockey Player out of the stance. No red flash: nothing hurt them, they
@@ -2292,8 +2607,7 @@ func die() -> void:
 	if _defending:
 		_exit_defense()
 		Sfx.play("shield_block")
-		is_invulnerable = true
-		get_tree().create_timer(DEFENSE_BREAK_GRACE).timeout.connect(_end_invulnerability)
+		grant_silent_grace(DEFENSE_BREAK_GRACE)
 		return
 	if _effective_shield_charges() > 0:
 		shield_charges -= 1
@@ -2307,6 +2621,7 @@ const DEATH_DURATION := 0.7
 
 func _kill() -> void:
 	_cancel_charge()
+	_end_build()
 	_defending = false
 	_set_crouch(false, true)
 	if _shield_overlay != null:

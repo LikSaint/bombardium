@@ -134,11 +134,11 @@ In-match:
 | Character | Passive | Ability (ability button) |
 |---|---|---|
 | Bomb-Master (Сапёр) | +1 bomb, +1 shield, from the start | **No fuse at all** — every bomb you place is a remote mine (blinking antenna, no ticking Timer) that only goes off when you press this |
-| Parkour Runner (Паркурщик) | +25% move speed, +1 shield | Double-tap a direction to hop over a crate, a bomb, **or an indestructible wall** (no button) |
-| Engineer | +1 bomb | Place a temp wall (12s) on your own cell — passable for you only, destroyed early by a blast. **One wall per bomb you have** |
+| Parkour Runner (Паркурщик) | +25% move speed, +1 shield | Double-tap a direction to hop over a crate, a bomb, **or an indestructible wall** (no button). **Nothing can hurt them in the air** — no damage, no shield spent — nor for 0.1s after landing (`Player._airborne`, `JUMP_LANDING_GRACE`); the portrait arcs up so it reads as a jump |
+| Engineer | +1 bomb, +1 shield | **Build** on the cell in front of you (hold to reinforce): a **wall** — three levels, passable for you only, **lasts 1 minute**, **one wall per bomb you have** — or a **bridge** over water. Aim the same button at a level-3 wall of yours and **hold it for 3s** to make it a **mini-turret**. See below |
 | Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs, and **is not hurt by an explosion from their own bombs** (`Player.is_immune_to_own_blast`) — only inside that bomb's blast, and only their own: a chain reaction into somebody else's bomb still kills | Every bomb explodes in a diamond and punches through crates |
 | Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, skating: unbroken straight-line running charges speed up to 1.6x over 0.8s, and kicking: walking into a bomb sends it **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide | **Dig in**: sit down in a defensive stance — the character crouches and a shield appears on them. While dug in they can't walk, kick or place bombs; the next hit that would have hurt them — a blast, a saw, fire — does nothing (no damage, no shield spent, no red flash) and just throws them out of the stance: they stand up and the shield swells and fades, with a second of invulnerability that isn't drawn. Pressing the button again leaves it too. Either way the ability is on a **2s cooldown** (`Player.DEFENSE_COOLDOWN`), shown as the red dial behind the character, like the Grenadier's |
-| Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two |
+| Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two. **Every speed powerup the Magnet picks up speeds the crawl by the same tenth it speeds them** (`Bomb._magnet_speed_factor`; the factor is read on every step, so bombs already out pick it up) |
 | Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its blast reaches — the full radius of an ordinary bomb of yours — and it goes off 0.2s after being tripped. An ordinary bomb **can be placed on top of a mine** (so a Miner boxed in by their own field can still blast out) — the mine then goes off together with that bomb |
 | Grenadier (Гранатомётчик) | +1 shield, **two charges** (spent on shells or on ordinary bombs — one pool; +1 per bomb powerup), **the bomb button drops an ordinary bomb, as for everyone**, a long cooldown that **shrinks with every shell collected** | Lob a shell in the direction you face, over walls, crates, water and people alike; it explodes the moment it lands, wherever it lands. On the **ability** button (E / X): **tap** it for 2 cells (the blast is cut short only on the side facing you), **hold** it to paint in a dial at your feet and walk the shot out to 4 cells (+1 per radius powerup), the blast growing with the distance — but holding plants you. While you hold, the landing cell and the cells its blast covers are lit in cyan |
 
@@ -170,6 +170,65 @@ more crates broken), so the rest of the roster was brought up to it rather than 
 The Engineer was the worst off — no passive at all, and a single minute-long wall — and got the
 biggest share of that: a starting bomb, a wall budget tied to their bomb count, and a wall lifetime
 short enough that more walls doesn't mean a permanently redrawn map.
+
+The Engineer's ability button is **build**, and it is a hold (`Player._begin_build`, `_build_tick`):
+
+- It builds on the cell **in front** of them — the way they face — not under their feet.
+- The first build is immediate. A tap is a **level-1 wall** (what the ability always was). Held, it
+  builds again every `Player.BUILD_TICK` (0.8s), and a wall's level is **how many ticks in a row, in
+  one hold, the build has been aimed at its cell**: the first tick makes it level 1, the second
+  level 2, the third level 3. A level is the number of blasts the wall takes to bring down
+  (`TempWall.hit`); a wall that has taken a hit and stood shows cracks, and raising it repairs it
+  fully. **Nothing carries over between holds**: building again on a wall that is already there is
+  level 1 at the first tick and changes nothing, and a level-2 wall still has to be stood over for
+  all three ticks to become level 3 — the level is made of the ticks, not of the wall's history.
+  Walls and turrets **live for a minute** (`TempWall.LIFETIME`): a wall that is raised gets a fresh
+  minute, and so does one turned into a turret — a turret has a whole minute of its own from the
+  moment it is made. A blast brings either down sooner (or Sudden Death walls over them). The cap — one
+  per bomb — stays, and with the walls expiring it is a budget that comes back.
+- While building the Engineer **stands still**, but the direction keys turn them, which is how the
+  cell is aimed. Turning does not build at once: the new cell gets its first build on the **next
+  tick** — a fresh level-1 wall if it is open, with the count of ticks starting again at one — so
+  sweeping the aim along a corridor lays a row.
+- The target cell is outlined (green when a build there would do something, red when not), with
+  pips for the wall's level now and next, and a dial at the feet fills towards the next tick — the
+  Grenadier's charge dial again.
+- A wall cannot go on a cell with a crate, a bomb, a pickup, a saw/turret or a **player** in it, and
+  the cap is still one per bomb they have (building up an existing wall costs nothing).
+- On **water** it builds a **bridge**, and on a bridge that was blown it finishes the repair at
+  once instead of waiting out the twenty seconds (`Arena.build_bridge_at`). A bridge laid on water
+  that never had one is theirs alone: blown, it is simply gone, instead of rebuilding itself the
+  way the map's own crossings do.
+- To make a **mini-turret** (`TempWall.make_turret`) the Engineer aims the same button, **in front**, at a
+  level-3 wall of theirs and **holds it for 3 seconds** (`Player.TURRET_UPGRADE_TIME`, longer than a
+  whole climb to level 3). The hold stops counting ticks and runs that clock instead, and a
+  **semi-transparent, blinking ghost of the turret** comes up on the wall, getting less
+  transparent as the hold goes on (drawn by the wall itself — `TempWall.set_upgrade_progress` — because the wall's
+  picture covers anything the Engineer could draw); the cell is outlined in orange and the dial at
+  their feet runs the 3s. Held straight through from nothing it is level 3 at 1.6s and the turret
+  3s after that. The bomb button is an ordinary bomb, as everywhere. The wall
+  must be level 3 and **undamaged** (a wall that has taken a hit won't do), and the Engineer must
+  have **a bomb to spare** — the last one is never spent on a turret — and a **turret to spare**: at
+  most **half the bombs they carry** (rounded down) at once (`Player.turret_limit`) — one at the
+  starting two, two at four. At the limit the cell's outline stays red and no ghost comes up. The charge is spent and
+  stays spent for as long as the turret stands — a minute, or until it is blown up — and comes
+  back with it. It lobs a small shell at the nearest living enemy every `TURRET_INTERVAL` (3s) between 2 and 7
+  cells away — never one that would catch its owner — with a
+  glow before each shot and a recoil after. It takes after its builder, at half strength: the shell's radius is 1 plus **half the Engineer's radius
+  bonus** (rounded down — the Grenadier's shell gets the same halving), and each **speed powerup** they
+  have taken shortens the time between shells by about 5%, half of what it does their own step
+  (`TempWall._turret_radius`, `_turret_interval`, `TURRET_SPEED_SHARE`). It carries **one shield** (`TempWall.TURRET_SHIELDS`): the first blast breaks it (the ring
+  and the shield icon go) and leaves the turret standing, the second brings it down — it is a
+  launcher on the wall, not the wall, so it is far easier to destroy than the level-3 wall it
+  came from. If any of that stops being true mid-hold — a blast hits the wall, the spare bomb is spent, the
+  aim moves — the ghost goes and the hold is an ordinary build again.
+- **Inside a wall, the wall takes the damage.** An Engineer standing in a wall or turret of theirs
+  takes **nothing from anything** (`Player.is_sheltered`): a blast takes a hit off the wall as it
+  reaches the cell, as it always did, and the person in it is not touched — no damage, no shield
+  spent. If that hit is the wall's last and it comes down, they are given 0.6s (`TempWall.BREAK_GRACE`)
+  to step clear of the blast still lingering on the cell.
+- Each level has its own picture — wood, stone with iron bands, steel with gold — drawn by
+  `tools/engineer_walls.py` into `assets/props/temp_wall_1..3.png` (they used to be drawn as crates).
 
 The Grenadier is the only ranged attack in the game. The *bomb* button (Space / A) puts an **ordinary
 bomb** on the floor, exactly as for every other character, at the full radius of one of theirs; the

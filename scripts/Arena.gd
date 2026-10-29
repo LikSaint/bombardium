@@ -245,6 +245,29 @@ func _add_bridge(cell: Vector2i, axis: Vector2i, protected: Dictionary) -> void:
 func is_bridge(cell: Vector2i) -> bool:
 	return bridges.has(cell)
 
+## Whether the Engineer can put a crossing here: water, in the arena, not the border.
+func can_build_bridge_at(cell: Vector2i) -> bool:
+	return in_bounds(cell) and not _is_border(cell) and get_cell_state(cell) == CellState.CHASM
+
+## The Engineer's bridge-building: on a bridge that was blown, it finishes the repair
+## at once instead of waiting out the twenty seconds; on water that never had a bridge,
+## it lays a new one running the way they are facing. A bridge built from nothing is the
+## Engineer's alone to keep — when it is blown it is simply gone, instead of rebuilding
+## itself the way the map's own crossings do.
+func build_bridge_at(cell: Vector2i, dir: Vector2i) -> bool:
+	if not can_build_bridge_at(cell):
+		return false
+	var bridge = bridges.get(cell)
+	if bridge != null:
+		bridge["repair"] = 1.0
+		bridge["timer"] = BRIDGE_REPAIR_INTERVAL
+	else:
+		bridges[cell] = {"axis": Vector2i(absi(dir.x), absi(dir.y)), "repair": 1.0, "timer": BRIDGE_REPAIR_INTERVAL, "built": true}
+	cells[cell] = CellState.EMPTY
+	Sfx.play("wall_place")
+	queue_redraw()
+	return true
+
 ## Called for every cell a blast touches (see Bomb._spawn_explosion), so a
 ## crossing goes down to any explosion that reaches it whatever its shape —
 ## and re-blowing one that is part way rebuilt puts it back to nothing.
@@ -255,6 +278,9 @@ func break_bridge_at(cell: Vector2i) -> void:
 	var was_intact: bool = bridge["repair"] >= 1.0
 	bridge["repair"] = 0.0
 	bridge["timer"] = BRIDGE_REPAIR_INTERVAL
+	# One the Engineer built stays down once blown (see build_bridge_at).
+	if bridge.get("built", false):
+		bridges.erase(cell)
 	if was_intact:
 		cells[cell] = CellState.CHASM
 		Sfx.play("wall_destroy")
@@ -583,13 +609,31 @@ func try_collect_powerup(cell: Vector2i, player: Node) -> void:
 	Sfx.play("powerup_pickup")
 	player.apply_powerup(type)
 
-func place_temp_wall(cell: Vector2i, owner: Node = null) -> Node:
+## Whether a wall can be put on this cell right now: open floor with nothing on it. Not
+## a crate or a bomb or a pickup, and not over anybody — a wall dropped on a player
+## would entomb them — nor a saw or a turret.
+func can_build_wall_at(cell: Vector2i) -> bool:
+	if not in_bounds(cell) or get_cell_state(cell) != CellState.EMPTY:
+		return false
+	if bombs_by_cell.has(cell) or powerups_by_cell.has(cell):
+		return false
+	for p in get_tree().get_nodes_in_group("players"):
+		if p.alive and p.get_current_cell() == cell:
+			return false
+	for mob in get_tree().get_nodes_in_group("hazard_mobs"):
+		if mob.cell == cell:
+			return false
+	return true
+
+func place_temp_wall(cell: Vector2i, owner: Node = null, level: int = 1) -> Node:
 	if get_cell_state(cell) != CellState.EMPTY or bombs_by_cell.has(cell):
 		return null
 	var wall := TempWallScene.instantiate()
 	wall.position = cell_to_world(cell)
 	wall.cell = cell
 	wall.arena = self
+	wall.level = level
+	wall.hp = level
 	add_child(wall)
 	cells[cell] = CellState.WALL
 	temp_wall_cells[cell] = owner
@@ -609,11 +653,20 @@ func remove_temp_wall(cell: Vector2i) -> void:
 func is_temp_wall(cell: Vector2i) -> bool:
 	return temp_wall_cells.has(cell)
 
-# Lets an explosion kill a temp wall immediately (see Bomb._apply_blast)
-# instead of leaving its sprite up until its own timer fires.
+# Lets an explosion kill a temp wall immediately instead of leaving its sprite up
+# until its own timer fires.
 func destroy_temp_wall_at(cell: Vector2i) -> void:
 	if temp_wall_nodes.has(cell):
 		temp_wall_nodes[cell].destroy()
+
+func get_temp_wall(cell: Vector2i) -> Node:
+	return temp_wall_nodes.get(cell)
+
+## A blast has reached the wall on this cell (see Bomb._apply_blast): it takes a hit,
+## and only comes down on its last. `breaker` is whoever's bomb it was.
+func hit_temp_wall_at(cell: Vector2i, breaker: Node) -> void:
+	if temp_wall_nodes.has(cell):
+		temp_wall_nodes[cell].hit(breaker)
 
 # Turns `cell` into permanent stone, clearing whatever was standing on it —
 # used by sudden death, which drops walls on the arena regardless of what's in

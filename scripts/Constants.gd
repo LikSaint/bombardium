@@ -394,6 +394,7 @@ func get_character_stats(character_id: int) -> Dictionary:
 			stats["shield"] = 1
 		2:  # Engineer
 			stats["bombs"] = 2
+			stats["shield"] = 1
 		3:  # Pyro
 			stats["shield"] = 1
 		4:  # Hockey player

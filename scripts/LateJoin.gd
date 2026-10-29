@@ -101,7 +101,9 @@ func _step(entry: Dictionary, direction: int) -> void:
 
 func _refresh_hud() -> void:
 	var enabled: bool = main != null and main.late_join_allowed()
-	var candidates: Array[int] = main.join_candidates() if enabled else []
+	var candidates: Array[int] = []
+	if enabled:
+		candidates = main.join_candidates()
 	var corners: Array = main.hud_corners
 	for i in corners.size():
 		var corner = corners[i]

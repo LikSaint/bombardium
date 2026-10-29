@@ -380,7 +380,7 @@ func _apply_blast() -> void:
 	for c in cells:
 		_spawn_explosion(c)
 		if arena.is_temp_wall(c):
-			arena.destroy_temp_wall_at(c)
+			arena.hit_temp_wall_at(c, owner_player)
 		elif arena.is_block(c):
 			arena.destroy_block_at(c, owner_player)
 		else:
@@ -515,10 +515,20 @@ func _magnet_step_duration(distance: int) -> float:
 	if distance >= MAGNET_RANGE_DORMANT:
 		return -1.0
 	if distance >= 6:
-		return MAGNET_STEP_FAR
+		return MAGNET_STEP_FAR * _magnet_speed_factor()
 	if distance >= 3:
-		return MAGNET_STEP_NEAR
-	return MAGNET_STEP_LUNGE
+		return MAGNET_STEP_NEAR * _magnet_speed_factor()
+	return MAGNET_STEP_LUNGE * _magnet_speed_factor()
+
+## How much faster than its base pace this bomb crawls: the same proportion its owner is
+## faster than a character with no speed bonus, so each speed powerup the Magnet picks
+## up shortens every step by the same tenth it shortens their own — 1.0 with none. Read
+## on every step, not once, so a pickup speeds up the bombs already out. (Not floored
+## at the owner's *cursed* pace: a curse slows the legs, not the bombs.)
+func _magnet_speed_factor() -> float:
+	if owner_player == null or not is_instance_valid(owner_player):
+		return 1.0
+	return clampf(owner_player.move_duration / owner_player.BASE_MOVE_DURATION, 0.25, 1.0)
 
 func _go_dormant() -> void:
 	_magnet_dir = Vector2i.ZERO
