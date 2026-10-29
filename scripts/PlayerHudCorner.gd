@@ -7,8 +7,14 @@ extends Control
 ## "press any button" in a slow pulse. A person who has pressed a button and is
 ## choosing a seat lights up the one they are on.
 ##
+## A small pictogram by the portrait says what drives the seat — robot, gamepad or
+## keyboard (see DeviceBadge) — and follows it when a pad drops out or somebody joins.
+##
 ## When a player dies, shows left/right arrows to cycle character selection
-## (takes effect next round), as well as a hotkey hint. The round winner gets
+## (takes effect next round), as well as a hotkey hint. The numbers give way to a line
+## saying the hero can be changed, and once the arrows are pressed to the new hero's
+## name and ability, as on the lobby slot — the numbers of a round that is over are no
+## use to anyone choosing what to be in the next one. The round winner gets
 ## the same arrows on their own portrait during the post-round overlay (see
 ## begin_winner_repick, called from Main.gd) — one re-pick UI for both cases
 ## instead of a second one built out of a screen-center label.
@@ -57,6 +63,7 @@ func _ready() -> void:
 func _on_language_changed() -> void:
 	_refresh_hint()
 	_refresh_join_label()
+	_refresh_info()
 
 func _apply_mirror() -> void:
 	var w: float = custom_minimum_size.x
@@ -70,6 +77,14 @@ func _apply_mirror() -> void:
 	var right_arrow: Polygon2D = $ArrowRight
 	left_arrow.position.x = w - left_arrow.position.x
 	right_arrow.position.x = w - right_arrow.position.x
+	var info: Control = $InfoLabel
+	var info_left: float = w - info.offset_right
+	info.offset_right = w - info.offset_left
+	info.offset_left = info_left
+	var badge: Control = $Badge
+	var badge_left: float = w - badge.offset_right
+	badge.offset_right = w - badge.offset_left
+	badge.offset_left = badge_left
 
 func _setup_arrow_animations() -> void:
 	pass
@@ -82,6 +97,9 @@ func bind(p: Node) -> void:
 	device_id = p.device_id
 	$Portrait.visible = true
 	$Stats.visible = true
+	$InfoLabel.visible = false
+	$Badge.visible = true
+	$Badge.set_device(device_id)
 	set_join_state(JoinState.NONE)
 	$ArrowLeft.visible = false
 	$ArrowRight.visible = false
@@ -103,6 +121,7 @@ func _on_player_disconnected(player_id: int) -> void:
 	if player == null or player_id != player.player_id:
 		return
 	device_id = Consts.DEVICE_BOT
+	$Badge.set_device(device_id)
 	$ArrowLeft.visible = false
 	$ArrowRight.visible = false
 	$HotkeyHint.visible = false
@@ -114,6 +133,7 @@ func _on_player_reconnected(player_id: int, device: int) -> void:
 	if player == null or player_id != player.player_id:
 		return
 	device_id = device
+	$Badge.set_device(device_id)
 	# A person has just taken this seat over from a bot: the bot's own re-pick stops, and
 	# a seat that was already dead hands them the arrows to pick a character with.
 	_bot_pick_steps = 0
@@ -142,6 +162,8 @@ func show_empty_slot() -> void:
 	modulate.a = 1.0
 	$Portrait.visible = false
 	$Stats.visible = false
+	$InfoLabel.visible = false
+	$Badge.visible = false
 	$ArrowLeft.visible = false
 	$ArrowRight.visible = false
 	$HotkeyHint.visible = false
@@ -242,6 +264,8 @@ func _bot_repick() -> void:
 	$ArrowLeft.visible = true
 	$ArrowRight.visible = true
 	_start_arrow_blink()
+	_info_shows_hero = true # a bot has nobody to tell it can switch: straight to who it is
+	_set_picking(true)
 	var count := Consts.CHARACTER_COUNT
 	var target := randi() % count
 	var forward := posmod(target - character_id, count)
@@ -268,10 +292,30 @@ func _show_character_selection() -> void:
 	$ArrowLeft.visible = true
 	$ArrowRight.visible = true
 	$HotkeyHint.visible = true
+	_info_shows_hero = false
+	_set_picking(true)
 	_refresh_hint()
 	_start_arrow_blink()
 	can_change_character = false
 	get_tree().create_timer(CHARACTER_CHANGE_DELAY).timeout.connect(func(): can_change_character = true)
+
+## Whether the info text names the current hero and what they do (true once the arrows
+## have been pressed, and from the start for a bot) or just says that a hero can be chosen.
+var _info_shows_hero: bool = false
+
+## Swaps the numbers for the info text while a character is being picked.
+func _set_picking(picking: bool) -> void:
+	$Stats.visible = not picking
+	$InfoLabel.visible = picking
+	_refresh_info()
+
+func _refresh_info() -> void:
+	if not $InfoLabel.visible:
+		return
+	if _info_shows_hero:
+		$InfoLabel.text = "%s\n%s" % [Consts.character_name(character_id), Consts.character_ability_desc(character_id, device_id)]
+	else:
+		$InfoLabel.text = Loc.t("SWAP_HERO_HINT")
 
 func _start_arrow_blink() -> void:
 	var blink := create_tween().set_loops()
@@ -325,5 +369,7 @@ func _input(event: InputEvent) -> void:
 func _change_character(dir: int) -> void:
 	character_id = posmod(character_id + dir, Consts.CHARACTER_COUNT)
 	GameManager.set_character_id(player.player_id, character_id)
+	_info_shows_hero = true
+	_refresh_info()
 	$Portrait.set_character(character_id, Consts.PLAYER_COLORS[(player.player_id - 1) % Consts.PLAYER_COLORS.size()])
 	_play_bounce_animation()

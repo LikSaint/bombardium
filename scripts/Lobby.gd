@@ -237,6 +237,13 @@ func _input_room(event: InputEvent) -> void:
 	if device == null:
 		return
 
+	# A pad that is not in the room yet joins on any button: the free slot if there is
+	# one, otherwise it takes over the first bot's.
+	if _find_slot_by_device(device).is_empty():
+		if _is_join_press(event, device) or _is_any_pad_button(event, device):
+			_join_device(device)
+		return
+
 	if _is_join_press(event, device):
 		_toggle_join_or_ready(device)
 	elif _is_left(event, device):
@@ -299,6 +306,16 @@ func _is_join_press(event: InputEvent, device: int) -> bool:
 		return event.keycode == KEY_SPACE
 	return Pad.is_confirm_button(event)
 
+## Any face/shoulder/stick button of a pad. The D-pad is left out because the left stick
+## is republished as D-pad presses (see Pad), so a thumb brushing a stick would sit
+## someone down; Start is the way back.
+func _is_any_pad_button(event: InputEvent, device: int) -> bool:
+	if device == -1 or not (event is InputEventJoypadButton):
+		return false
+	return not (event.button_index in [
+		JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_START,
+	])
+
 func _is_left(event: InputEvent, device: int) -> bool:
 	if device == -1:
 		return event.keycode == KEY_A
@@ -315,18 +332,40 @@ func _find_slot_by_device(device: int) -> Dictionary:
 			return s
 	return {}
 
+## Seats `device`: the first free slot, or — with none left — the first bot's, which
+## keeps its place and its character. Not ready yet, so the countdown (if one was
+## running) stops. Returns whether there was anywhere to sit.
+func _join_device(device: int) -> bool:
+	if slots.size() < Consts.configured_player_slots:
+		slots.append({"device": device, "player_id": slots.size() + 1, "character_id": 0, "ready": false})
+	else:
+		var bot := _first_bot_index()
+		if bot < 0:
+			return false
+		slots[bot]["device"] = device
+		slots[bot]["ready"] = false
+	_cancel_countdown()
+	Sfx.play_menu()
+	_refresh_slots_ui()
+	return true
+
+func _first_bot_index() -> int:
+	for i in slots.size():
+		if slots[i]["device"] == Consts.DEVICE_BOT:
+			return i
+	return -1
+
 func _toggle_join_or_ready(device: int) -> void:
 	var slot := _find_slot_by_device(device)
 	if slot.is_empty():
-		if slots.size() >= Consts.configured_player_slots:
+		if not _join_device(device):
 			return
-		slots.append({"device": device, "player_id": slots.size() + 1, "character_id": 0, "ready": false})
 	else:
 		slot["ready"] = not slot["ready"]
 		if not slot["ready"]:
 			_cancel_countdown()
-	Sfx.play_menu()
-	_refresh_slots_ui()
+		Sfx.play_menu()
+		_refresh_slots_ui()
 	_maybe_start()
 
 func _append_bot_slot() -> void:
@@ -407,4 +446,4 @@ func _refresh_slots_ui() -> void:
 			node.show_joined(i, slot["character_id"], slot["ready"], slot["device"] == Consts.DEVICE_BOT, slot["device"])
 		else:
 			node.show_empty()
-	join_hint.visible = slots.size() < Consts.configured_player_slots
+	join_hint.visible = slots.size() < Consts.configured_player_slots or _first_bot_index() >= 0

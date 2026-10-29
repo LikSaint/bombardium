@@ -57,8 +57,9 @@ const STRINGS := {
 		"NO_PLAYERS_LEFT": "Игроков нет — игра завершится через: %d",
 		"DISCONNECTED_HINT": "Отключено…",
 		"CYCLE_HINT": "%s — сменить",
+		"SWAP_HERO_HINT": "Можете сменить героя",
 
-		"LOBBY_LEGEND": "%s — присоединиться, ещё раз — готов\n%s или %s — сменить персонажа",
+		"LOBBY_LEGEND": "%s — присоединиться, ещё раз — готов (геймпад: любая кнопка)\n%s или %s — сменить персонажа",
 		"MAIN_HOTKEY_HINT": "Движение — WASD / стик   •   Бомба — Space / A   •   Способность — E / X\nПауза — Esc / Start",
 		"PAUSE_HOTKEY_HINT": "A/D или ◄► / стик — навигация   •   Space/A — выбрать   •   Esc/Start — закрыть",
 
@@ -140,8 +141,9 @@ const STRINGS := {
 		"NO_PLAYERS_LEFT": "No players left — the game ends in: %d",
 		"DISCONNECTED_HINT": "Disconnected…",
 		"CYCLE_HINT": "%s — change",
+		"SWAP_HERO_HINT": "You can switch your hero",
 
-		"LOBBY_LEGEND": "%s — join, press again — ready\n%s or %s — change character",
+		"LOBBY_LEGEND": "%s — join, press again — ready (gamepad: any button)\n%s or %s — change character",
 		"MAIN_HOTKEY_HINT": "Move — WASD / stick   •   Bomb — Space / A   •   Ability — E / X\nPause — Esc / Start",
 		"PAUSE_HOTKEY_HINT": "A/D or ◄► / stick — navigate   •   Space/A — select   •   Esc/Start — close",
 

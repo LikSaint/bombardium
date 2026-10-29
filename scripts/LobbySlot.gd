@@ -2,7 +2,7 @@ extends Control
 ## One player slot in the Lobby: a "+" placeholder until a device joins,
 ## then that device's chosen character portrait (tinted to their team color)
 ## + blinking left/right arrows (hinting the character can still be cycled)
-## + a checkmark once ready, plus the character's name and ability blurb.
+## + a pictogram of what drives the slot (robot, gamepad, keyboard) + a checkmark once ready, plus the character's name and ability blurb.
 
 var _is_empty: bool = true
 var _player_index: int
@@ -35,7 +35,7 @@ func show_empty() -> void:
 	$Check.visible = false
 	$ArrowLeft.visible = false
 	$ArrowRight.visible = false
-	$BotBadge.visible = false
+	$Badge.visible = false
 	$NameLabel.visible = false
 	$Stats.visible = false
 	$AbilityLabel.visible = false
@@ -57,8 +57,8 @@ func show_joined(player_index: int, character_id: int, is_ready: bool, is_bot: b
 	$Check.visible = is_ready
 	$ArrowLeft.visible = not is_ready and not is_bot
 	$ArrowRight.visible = not is_ready and not is_bot
-	$BotBadge.visible = is_bot
-	$BotBadge.text = Loc.t("BOT_BADGE")
+	$Badge.visible = true
+	$Badge.set_device(Consts.DEVICE_BOT if is_bot else device_id)
 	$NameLabel.visible = true
 	$NameLabel.text = Consts.character_name(character_id)
 	_show_character_stats(character_id)

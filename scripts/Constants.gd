@@ -129,7 +129,7 @@ const PLAYER_SLOTS_MAX := MAX_PLAYERS
 var configured_player_slots: int = MAX_PLAYERS
 
 const BOTS_MIN := 0
-var configured_bots: int = 0
+var configured_bots: int = 3
 
 func set_configured_player_slots(value: int) -> void:
 	configured_player_slots = clampi(value, PLAYER_SLOTS_MIN, PLAYER_SLOTS_MAX)

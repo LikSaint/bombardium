@@ -24,7 +24,12 @@ and other state as plain text, since icons alone weren't discoverable enough:
 - **Map**: which terrain the arena is carved into — Classic, Bridges, Crater, Quarters, Plaza, or
   Random (the default, re-rolled every round). See [Maps](#maps).
 - **Bots**: the Settings screen's Bots row (◄► on gamepad or keyboard) fills open slots with AI-controlled
-  bots (a random character, instantly ready — shown with an "ИИ" badge instead of the ready checkmark).
+  bots (a random character, instantly ready). It defaults to **3** (`Consts.configured_bots`), so the Room
+  opens with three bots and one free slot. A pad that is not in the Room yet **joins on any button** (D-pad
+  and Start excepted — the left stick is republished as D-pad presses, and Start goes back): into the free
+  slot if there is one, otherwise it takes over the first bot's, keeping its place and character, not ready
+  (`Lobby._join_device`). The keyboard joins on Space. Every slot — in the Room and on the in-match HUD
+  corners — carries a small pictogram of what drives it: robot, gamepad or keyboard (`DeviceBadge`).
   Bots play with the same character/rules as anyone else, just slower to react than a human would be
   (see Architecture notes).
 - A hotkey legend for all of the above sits fixed at the bottom of the Lobby screen.
@@ -585,6 +590,10 @@ explodes when caught in someone else's blast, is designed but not built — see
   used to walk each player's `live_bombs` instead — fine for the Grenadier's own shots, but a
   Turret's shell has `owner_player == null` and would never appear in anyone's `live_bombs`, so a bot
   would be the only thing on the arena that couldn't see it coming.
+- **Dead players choose a hero without the numbers.** When a player dies (or wins a round), their HUD
+  corner swaps the stat numbers for "You can switch your hero" (`SWAP_HERO_HINT`); the first arrow press
+  replaces it with the new hero's name and ability blurb, as on a Lobby slot, and it follows every further
+  press (`PlayerHudCorner._refresh_info`). A bot's corner shows the name and blurb from the start.
 - Bots **re-pick their character** the way people do: after a bot dies, or wins a round, its HUD
   corner shows the same arrows (no key hint — a bot has no keys), and after a short pause
   (`PlayerHudCorner.BOT_PICK_DELAY_MIN`/`MAX`) the portrait flicks to a randomly chosen character, one
