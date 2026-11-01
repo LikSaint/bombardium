@@ -10,3 +10,6 @@ build/
 
 # OS
 .DS_Store
+
+# Rendered Steam videos (large)
+docs/steam/out/

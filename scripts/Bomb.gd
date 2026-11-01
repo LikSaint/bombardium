@@ -86,9 +86,12 @@ const REMOTE_FUSE_DURATION := 8.0
 const MINE_ARM_DELAY := 0.6
 const MINE_TRIP_DELAY := 0.3
 ## Beep spacing while a trip counts down: it starts at the slow end and closes in on the
-## fast end as the blast nears, which is the "about to go off" ramp.
-const MINE_BEEP_SLOW := 0.12
-const MINE_BEEP_FAST := 0.04
+## fast end as the blast nears, which is the "about to go off" ramp. The tick sample is
+## 0.09s long, and the countdown is only 0.3s: the spacing has to be this tight for a
+## trip to read as a *beeping* (a run of beeps) and not as a single blip, even if the
+## player is back out of range after a tenth of a second.
+const MINE_BEEP_SLOW := 0.07
+const MINE_BEEP_FAST := 0.03
 ## How many on/off blinks the strobe has made by the time the mine goes off; the blinks
 ## come faster and faster (see _mine_strobe_on), so the last ones are a flicker.
 const MINE_STROBE_CYCLES := 3.0
