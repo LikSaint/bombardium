@@ -48,6 +48,9 @@ var follow_index := 0
 var cam_mode := "player"
 var cam_point := Vector2.ZERO
 var cam_zoom := CLOSE_ZOOM
+var _cam_saved := false
+var _cam_zoom0 := Vector2.ONE
+var _cam_pos0 := Vector2.ZERO
 var cam_min_x := 0.0 # px: the camera's left edge stays east of this (0: no limit)
 var eng: Node = null
 var foes: Array = []
@@ -64,6 +67,7 @@ func _ready() -> void:
 	shots_dir = args.get("shots", shots_dir)
 	plan = args.get("plan", plan)
 	lang = args.get("lang", "en")
+	captions = args.get("captions", "0") == "1"
 	_run.call_deferred()
 
 func _process(delta: float) -> void:
@@ -96,10 +100,17 @@ func _process(delta: float) -> void:
 	var ui: CanvasLayer = main.get_node("UI")
 	backdrop.visible = not close_mode
 	ui.visible = not close_mode
+	var camera: Camera2D = main.get("camera")
 	if not close_mode:
 		_snap_camera = true
+		if _cam_saved: # back to the game's own view of the whole arena
+			camera.zoom = _cam_zoom0
+			camera.position = _cam_pos0
 		return
-	var camera: Camera2D = main.get("camera")
+	if not _cam_saved:
+		_cam_saved = true
+		_cam_zoom0 = camera.zoom
+		_cam_pos0 = camera.position
 	var target := _follow_target()
 	var z := lerpf(camera.zoom.x, cam_zoom, clampf(delta * 3.0, 0.0, 1.0)) if not _snap_camera else cam_zoom
 	var view := get_viewport().get_visible_rect().size / z
@@ -184,6 +195,10 @@ func _run() -> void:
 		await _sapper_scene()
 	elif plan == "engineer":
 		await _engineer_scene()
+	elif plan == "join":
+		await _join_scene()
+	elif plan == "lobby":
+		await _lobby_main_scene()
 	elif plan != "menus":
 		for m in PLANS[plan]:
 			await _play_match(m)
@@ -264,8 +279,12 @@ func _begin_match(layout: int, size: int, chars: Array, devices: Array) -> void:
 	Engine.time_scale = 1.0
 	get_tree().change_scene_to_file(MAIN)
 	await _wait(0.2)
+	var no_players: Label = get_tree().current_scene.get("_no_players_label")
+	if no_players != null:
+		no_players.visible = false # an all-bot match counts itself down; not on screen, and not for real
 	get_tree().current_scene.set("_no_players_label", null)
 	arena = get_tree().current_scene.get("arena")
+	_cam_saved = false
 
 func _cut(mode: String, zoom: float = CLOSE_ZOOM, index: int = 0) -> void:
 	if mode == "wide":
@@ -1183,3 +1202,161 @@ func _engineer_scene() -> void:
 	await _shot("engineer_11_victory")
 	await _wait(0.6)
 	close_mode = false
+
+
+# --- Main trailer, part 1: "A classic, reimagined" and joining a running match --------------
+#
+# Three bots are at it on a Classic map with one seat free ("Press any button" on its panel).
+# Gamepads then sit down through the game's own late-join screen: a first press says "I'm here",
+# the seat is picked, A takes it. The pads are not real: their button presses are fed to the
+# input system, and once a seat is taken the character is handed to the bot brain, so the newcomer
+# plays on at once while his panel keeps the gamepad pictogram.
+
+var captions := false # plan arg captions=1 draws the wording over the picture (a quick look)
+var _cap_layer: CanvasLayer = null
+
+## A caption over the picture, top centre: pops in, stays `secs`, fades. Returns at once.
+func _caption(text: String, secs: float, color: Color = Color.WHITE, size: int = 54) -> void:
+	if not captions: # the main trailer's wording is title cards on black (tools/steam/make_cards.py)
+		return
+	_caption_run(text, secs, color, size)
+
+func _caption_run(text: String, secs: float, color: Color, size: int) -> void:
+	if _cap_layer == null or not is_instance_valid(_cap_layer):
+		_cap_layer = CanvasLayer.new()
+		_cap_layer.layer = 128
+		add_child(_cap_layer)
+	var vp := get_viewport().get_visible_rect().size
+	var l := Label.new()
+	l.text = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_color_override("font_outline_color", Color(0.05, 0.03, 0.1, 0.96))
+	l.add_theme_constant_override("outline_size", 12)
+	l.size = Vector2(vp.x, size * 1.5)
+	l.position = Vector2(0, 26)
+	l.pivot_offset = l.size / 2.0
+	l.modulate.a = 0.0
+	l.scale = Vector2(0.88, 0.88)
+	_cap_layer.add_child(l)
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(l, "modulate:a", 1.0, 0.18)
+	tw.tween_property(l, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	await get_tree().create_timer(maxf(secs - 0.25, 0.1), true, false, true).timeout
+	if is_instance_valid(l):
+		var out := create_tween()
+		out.tween_property(l, "modulate:a", 0.0, 0.25)
+		await out.finished
+		l.queue_free()
+
+## One press of a button on a (fake) gamepad.
+func _tap(device: int, button: int) -> void:
+	for down in [true, false]:
+		var ev := InputEventJoypadButton.new()
+		ev.device = device
+		ev.button_index = button
+		ev.pressed = down
+		Input.parse_input_event(ev)
+		await get_tree().process_frame
+
+## The newcomer plays on by himself: his seat keeps the pad, the bot brain moves the character.
+func _hand_to_brain(player_id: int) -> void:
+	await get_tree().process_frame
+	var p := _player(player_id)
+	if p != null:
+		p.is_bot = true
+
+func _join_scene() -> void:
+	# Four bots at it: Kicker, Parkour Runner, Miner, Grenadier. (Not the Pyro: he is immune to his own
+	# diagonal arms and plays like it. Not the Sapper either: his bot sets bombs off the moment they land.)
+	await _begin_match(1, 3, [4, 1, 6, 7], [])
+	Music.play_track(Music.Track.ARENA)
+	await _wait(7.0) # the match is already going
+	print("STORY_START frame=", Engine.get_frames_drawn())
+	await _shot("main_01_arena")
+
+	# 1. The whole arena with the HUD, then in on two of the fighters in turn: nine seconds of play.
+	await _wait(2.5)
+	_cut("player", 1.8, 0)
+	await _wait(2.5)
+	_cut("player", 1.8, 2)
+	await _wait(2.5)
+	_cut("wide")
+	await _wait(1.5)
+
+	# 2. Gamepads sit down on three of the bots' seats (the first press only says "I'm here").
+	await _wait(0.4)
+	await _tap(0, JOY_BUTTON_X)
+	await _wait(1.0)
+	await _shot("main_02_prompt")
+	await _tap(0, JOY_BUTTON_A)
+	_hand_to_brain(1)
+	await _wait(0.5)
+	_cut("player", 1.8, 0)
+	await _wait(1.3)
+	_cut("wide")
+	await _wait(0.2)
+	await _tap(1, JOY_BUTTON_X)
+	await _wait(0.9)
+	await _tap(1, JOY_BUTTON_A)
+	_hand_to_brain(2)
+	await _wait(0.9)
+	await _tap(2, JOY_BUTTON_X)
+	await _wait(0.5)
+	await _tap(2, JOY_BUTTON_DPAD_RIGHT) # looks at the other bot's seat first
+	await _wait(0.6)
+	await _shot("main_03_choosing")
+	await _tap(2, JOY_BUTTON_A)
+	_hand_to_brain(4)
+	await _wait(0.9)
+	await _shot("main_04_joined")
+
+	# 3. Pads in every corner of the HUD.
+	await _wait(3.4)
+	await _shot("main_05_pads")
+	await _wait(0.4)
+
+
+# --- Main trailer, part 2: bots in the lobby, picking a hero ----------------------------------
+#
+# The Room screen as the game has it: a gamepad is in, three seats are bots; a second pad sits
+# down on a bot's seat with one press, then both pads page through the heroes with the D-pad.
+
+func _lobby_main_scene() -> void:
+	close_mode = false
+	Music.play_track(Music.Track.MENU)
+	get_tree().change_scene_to_file(LOBBY)
+	await _wait(0.6)
+	var lobby := get_tree().current_scene
+	var seats: Array[Dictionary] = [ # (a plain Array would be refused: the lobby's slots are typed)
+		{"device": 0, "player_id": 1, "character_id": 4, "ready": false},
+		{"device": Consts.DEVICE_BOT, "player_id": 2, "character_id": 1, "ready": true},
+		{"device": Consts.DEVICE_BOT, "player_id": 3, "character_id": 6, "ready": true},
+		{"device": Consts.DEVICE_BOT, "player_id": 4, "character_id": 7, "ready": true},
+	]
+	lobby.set("slots", seats)
+	lobby.call("_show_view", "room")
+	lobby.call("_refresh_slots_ui")
+	await _wait(0.5)
+	print("STORY_START frame=", Engine.get_frames_drawn())
+	await _shot("main_10_lobby")
+
+	# 4. Bots keep the empty seats busy; a friend takes one over.
+	_caption("No one to play with? Add bots.", 4.6)
+	await _wait(1.8)
+	await _tap(1, JOY_BUTTON_A)
+	await _wait(1.6)
+	await _shot("main_11_two_pads")
+	await _wait(1.0)
+
+	# 5. New heroes: both pads page through the roster.
+	_caption("New heroes. Unique abilities.", 5.2)
+	for i in 8:
+		await _tap(0, JOY_BUTTON_DPAD_RIGHT)
+		if i % 2 == 1:
+			await _tap(1, JOY_BUTTON_DPAD_LEFT)
+		if i == 3:
+			await _shot("main_12_heroes")
+		await _wait(0.5)
+	await _wait(0.5)
