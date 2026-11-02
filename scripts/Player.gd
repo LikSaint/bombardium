@@ -7,7 +7,7 @@ extends CharacterBody2D
 ## how a single project supports up to 4 local gamepads by device index.
 ## device_id == Consts.DEVICE_BOT means AI-controlled: _bot_think() replaces
 ## both _poll_move_dir() and the bomb button, deciding a move direction and
-## bombing decision every BOT_DECISION_INTERVAL via simple danger-avoidance +
+## bombing decision every decision interval (set by the bot level) via simple danger-avoidance +
 ## BFS pathing (flee live blasts, else grab a nearby powerup, else chase the
 ## nearest enemy/block, and drop a bomb only when a safe escape route from its
 ## own blast still exists).
@@ -163,21 +163,20 @@ var _bomb_grace: Dictionary = {} # Vector2i -> true
 var _scripted_move: bool = false
 
 var is_bot: bool = false
-const BOT_DECISION_INTERVAL := 0.6 # pause between bot decisions; higher = slower/calmer bots
 const BOT_DECISION_JITTER := 0.15 # +/- random spread so bots don't all tick in lockstep
 var bot_decision_timer: float = 0.0
+var _bot_detonate_since: float = -1.0 # when a target first stood in a Sapper bot's blast; -1 = nobody does
 var bot_move_dir: Vector2i = Vector2i.ZERO
 var bot_target_cell: Vector2i = Vector2i.ZERO
 var bot_hold_time: float = 0.0
 const BOT_HOLD_TIMEOUT_FACTOR := 2.5 # give up on an unreachable target after this many step-times
 # While actively escaping a blast, decisions run every frame (no throttle) —
-# only casual wandering/bombing-consideration is paced by BOT_DECISION_INTERVAL.
+# only casual wandering/bombing-consideration is paced by the bot level's decision interval.
 # Escape timing in _bot_should_bomb() assumes this, so don't throttle fleeing.
 var is_fleeing: bool = false
 # Enemy mine instance id -> the clock reading at which this bot stops believing
 # it is there. See _bot_remembers_mine.
 var _mine_memory: Dictionary = {}
-const BOT_POWERUP_CHASE_MAX_STEPS := 8 # further than this, a pickup isn't worth abandoning the hunt for
 const BOMB_FUSE_DURATION := 2.0 # must match Bomb.tscn's Timer wait_time
 const BOMB_ESCAPE_SAFETY_MARGIN := 0.4 # buffer so a bomb is never a photo finish
 
@@ -236,8 +235,8 @@ const BOT_MINE_MEMORY_MAX := 10.0
 #
 # The cooldown is what makes that a progression. It is a table indexed by how many
 # shells beyond the starting two the Grenadier has collected (GRENADE_COOLDOWNS):
-# 1.6s at the starting kit, 1.0s with one extra, 0.6s with two, and so on down to
-# 0.15s, counted from the throw. A Grenadier with the starting kit lobs one shell
+# 0.8s at the starting kit, 0.5s with one extra, 0.3s with two, and so on down to
+# 0.075s, counted from the throw. A Grenadier with the starting kit lobs one shell
 # and waits for it; one with a handful can put several in the air at nearly the pace
 # they can press the button, which is the whole point of collecting them.
 #
@@ -256,9 +255,9 @@ const GRENADE_START_SHELLS := 2
 const GRENADE_CHARGE_TIME := 0.6
 ## Cooldown after a throw, in seconds, by how many shells beyond GRENADE_START_SHELLS
 ## have been collected; past the end of the list the last entry stays. The first
-## three are the tuned values (1.6, 1.0, 0.6); the rest carry on at about the same
+## three are the tuned values (0.8, 0.5, 0.3, half of what they were); the rest carry on at about the same
 ## rate down to the floor.
-const GRENADE_COOLDOWNS: Array[float] = [1.6, 1.0, 0.6, 0.4, 0.25, 0.15]
+const GRENADE_COOLDOWNS: Array[float] = [0.8, 0.5, 0.3, 0.2, 0.125, 0.075]
 ## Colour of the landing-cell preview while charging. Deliberately not the orange
 ## of the charge dial or of the in-flight marker (Bomb.FLIGHT_MARKER_COLOR): those
 ## mean "this is committed", this means "this is where it would go".
@@ -437,10 +436,8 @@ func _apply_character_passives() -> void:
 			powerup_weights = [3, 1, 1, 1]  # BOMB_COUNT — every bomb is another wall
 		CharacterId.PYRO:
 			# RADIUS: a step buys the Pyro six cells of blast where it buys anyone
-			# else four, and it is also what pays for cover — the arms only start
-			# coming through crates at radius 3 and through stone at radius 5 (see
-			# Arena.CRATE_PIERCE_COST). Radius is the Pyro's power stat twice over,
-			# and the weights should say so.
+			# else four. Radius is the Pyro's power stat, and the weights should
+			# say so.
 			#
 			# These were set when the blast was a filled diamond, where a radius
 			# step was worth *quadratically* more and this weighting compounded
@@ -802,7 +799,7 @@ func _try_jump_over_obstacle(dir: Vector2i) -> void:
 ## Only actually moves once per decision (returns the chosen dir exactly the
 ## frame it's decided, Vector2i.ZERO every other frame) so the bot visibly
 ## stands still between steps instead of running in a straight line for the
-## whole interval — that's what makes BOT_DECISION_INTERVAL read as "slower"
+## whole interval — that's what makes a longer decision interval read as "slower"
 ## rather than just "re-routes less often". Exception: while is_fleeing, the
 ## next decision is scheduled immediately (no throttle, no jitter) so the bot
 ## actually moves at full speed while escaping its own bomb — see the timing
@@ -813,7 +810,7 @@ func _bot_update(delta: float) -> Vector2i:
 	# Checked every frame rather than on the decision tick, unlike everything
 	# else the bot does: the window for a detonation is open only while an
 	# enemy is actually standing in the blast, and someone walking through at
-	# full tilt clears a cell in well under one BOT_DECISION_INTERVAL.
+	# full tilt clears a cell in well under one decision interval.
 	if character_id == CharacterId.BOMB_MASTER:
 		_bot_try_detonate()
 
@@ -855,12 +852,28 @@ func _bot_update(delta: float) -> Vector2i:
 
 	if bot_decision_timer <= 0.0:
 		_bot_think()
-		bot_decision_timer = 0.0 if is_fleeing else BOT_DECISION_INTERVAL + randf_range(-BOT_DECISION_JITTER, BOT_DECISION_JITTER)
+		bot_decision_timer = 0.0 if is_fleeing else _bot_profile()["interval"] + randf_range(-BOT_DECISION_JITTER, BOT_DECISION_JITTER)
 		if bot_move_dir != Vector2i.ZERO:
 			bot_target_cell = get_current_cell() + bot_move_dir
 			bot_hold_time = 0.0
 		return bot_move_dir
 	return Vector2i.ZERO
+
+## One bot's own level, when it should differ from the lobby's: -1 follows the lobby.
+## Nothing in the game sets it; it is how a test puts bots of different levels in the
+## same match.
+var bot_level_override: int = -1
+
+## The knobs of the level the lobby set (see Consts.BOT_PROFILES).
+func _bot_profile() -> Dictionary:
+	if bot_level_override >= 0:
+		return Consts.BOT_PROFILES[bot_level_override]
+	return Consts.bot_profile()
+
+## Whether this bot plants the bomb it has worked out it cannot get clear of. Only the
+## lower levels ever say yes, and it is how they end up in their own blasts.
+func _bot_is_careless() -> bool:
+	return randf() < _bot_profile()["careless"]
 
 func _bot_think() -> void:
 	if arena == null:
@@ -882,20 +895,21 @@ func _bot_think() -> void:
 	# Terrain first: a wall costs the Engineer nothing to place (they walk
 	# through their own), so it's never worth giving up a turn for, and it
 	# leaves the bot free to bomb or wander in the same decision.
-	if character_id == CharacterId.ENGINEER:
+	var tries_ability: bool = randf() < _bot_profile()["ability"]
+	if character_id == CharacterId.ENGINEER and tries_ability:
 		_bot_try_wall(danger)
 	# A mine, unlike a wall, comes out of the same charges as bombs, so it is
 	# decided first and the bomb check below sees what is actually left. Nothing
 	# has to stop the bot doing both in one decision: a planted mine occupies
 	# this cell, and the bomb branch already refuses an occupied one.
-	if character_id == CharacterId.MINER:
+	if character_id == CharacterId.MINER and tries_ability:
 		_bot_try_mine(danger)
 	# Same reasoning as the mine: a shell is a charge, so it is spent before the
 	# bomb branch counts what is left. Unlike the mine it also needs the bot
 	# turned the right way, which is why it is decided here rather than folded
 	# into _bot_should_bomb — the shot and the walking heading disagree about
 	# where this bot is facing, and the shot wins for exactly one frame.
-	if character_id == CharacterId.GRENADIER:
+	if character_id == CharacterId.GRENADIER and tries_ability:
 		_bot_try_grenade()
 	if bomb_count_current > 0 and not arena.has_bomb_at(current_cell) \
 			and _bot_should_bomb(danger, hazard):
@@ -958,16 +972,18 @@ func _compute_danger_cells() -> Dictionary:
 	var danger := {}
 	for bomb_cell in arena.bombs_by_cell.keys():
 		var bomb = arena.bombs_by_cell[bomb_cell]
-		# Nothing to fear from a bomb that cannot hurt this bot: its own, when it is
-		# immune to them (see is_immune_to_own_blast).
-		if bomb.owner_player == self and is_immune_to_own_blast():
-			continue
+		# The diagonal arms of its own bomb cost this bot nothing when it is immune to
+		# them (see is_immune_to_own_diagonals); the straight arms still do.
+		var spared: bool = bomb.owner_player == self and is_immune_to_own_diagonals()
 		# A forgotten mine is not merely un-feared, it is *not there* as far as
 		# this bot is concerned: leaving its footprint out of the danger map is
 		# what lets the bot walk in, stand on it and take the hit.
 		if bomb.is_mine and not _bot_remembers_mine(bomb):
 			continue
-		for c in _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast, bomb.capped_dir, bomb.capped_radius):
+		var blast := _blast_cells_for(bomb_cell, bomb.radius, bomb.is_star_blast, bomb.capped_dir, bomb.capped_radius)
+		for c in blast:
+			if spared and blast[c] == Consts.BLAST_SECONDARY:
+				continue
 			danger[c] = true
 	# A shell in the air is not on the grid and so never appears in
 	# bombs_by_cell (see Bomb._ready), but it is drawn overhead with a ring
@@ -1015,7 +1031,7 @@ func _bot_remembers_mine(bomb) -> bool:
 	var key: int = bomb.get_instance_id()
 	var now: float = Time.get_ticks_msec() / 1000.0
 	if not _mine_memory.has(key):
-		_mine_memory[key] = now + randf_range(BOT_MINE_MEMORY_MIN, BOT_MINE_MEMORY_MAX)
+		_mine_memory[key] = now + randf_range(BOT_MINE_MEMORY_MIN, BOT_MINE_MEMORY_MAX) * _bot_profile()["mine_memory"]
 	return now < _mine_memory[key]
 
 ## Mines are the one bomb that can outlive several of its own kind — no fuse, no
@@ -1042,7 +1058,7 @@ func _compute_active_hazard_cells() -> Dictionary:
 	var hazard := {}
 	for child in arena.get_children():
 		if child.get_script() == ExplosionScript:
-			if child.owner_player == self and is_immune_to_own_blast():
+			if child.secondary and child.owner_player == self and is_immune_to_own_diagonals():
 				continue
 			hazard[arena.world_to_cell(child.position)] = true
 	# Any contact hazard (see the "hazard_mobs" group note on Bomb._apply_blast)
@@ -1103,7 +1119,7 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 	# transit via the `avoid` param, since they're lethal immediately.
 	var escape := _bfs_find(current_cell, func(c): return not combined_danger.has(c), hazard)
 	if escape.is_empty():
-		return false
+		return _bot_is_careless()
 	# A path existing isn't enough — it has to be walkable before the fuse
 	# goes off. Once fleeing starts it's one step per move_duration with no
 	# pause (is_fleeing above), so that's the true per-step cost to budget.
@@ -1112,8 +1128,8 @@ func _bot_should_bomb(danger: Dictionary, hazard: Dictionary) -> bool:
 	# The goal is winning, not just surviving — a kill opportunity is worth
 	# more risk than farming a block for an upgrade, so it gets a smaller
 	# safety margin (more willing to cut it close when an enemy is in blast).
-	var margin := BOMB_ESCAPE_SAFETY_MARGIN * 0.5 if targets_enemy else BOMB_ESCAPE_SAFETY_MARGIN
-	return time_needed <= _time_until_forced_detonation() - margin
+	var margin: float = (BOMB_ESCAPE_SAFETY_MARGIN * 0.5 if targets_enemy else BOMB_ESCAPE_SAFETY_MARGIN) * _bot_profile()["margin_scale"]
+	return time_needed <= _time_until_forced_detonation() - margin or _bot_is_careless()
 
 # Bombs chain-detonate (Bomb.gd's _trigger_chain_at): if a bomb that's
 # already ticking has a blast that reaches the cell we're about to bomb, it
@@ -1220,6 +1236,11 @@ func _bot_flee(danger: Dictionary, hazard: Dictionary) -> void:
 
 func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 	var current_cell := get_current_cell()
+	# The lower levels don't always know where they are going: now and then the step
+	# is a random safe one instead of the one toward a powerup, an enemy or a crate.
+	if randf() < _bot_profile()["idle"]:
+		bot_move_dir = _bot_random_safe_dir(danger, hazard)
+		return
 	# Unlike fleeing, wandering is never forced through danger — there's no
 	# urgency, so avoid every currently-ticking blast footprint entirely
 	# (not just active hazards), or the hunt for an enemy/block can route the
@@ -1232,13 +1253,13 @@ func _bot_wander(danger: Dictionary, hazard: Dictionary) -> void:
 	# and walking onto the cell is all it takes (Arena.try_collect_powerup fires
 	# on arrival). Only worth it while it's a short detour, though — chasing one
 	# across the whole arena would leave the bot passive, so anything further
-	# than BOT_POWERUP_CHASE_MAX_STEPS is ignored in favour of the usual hunt.
+	# than the level's chase_steps is ignored in favour of the usual hunt.
 	var path: Array = []
 	if not arena.powerups_by_cell.is_empty():
 		var pickup := _bfs_find(current_cell, func(c): return arena.has_powerup_at(c), unsafe)
 		# size() == 1 would mean "already standing on it" (impossible — pickup is
 		# automatic), so require a real step rather than freezing on the spot.
-		if pickup.size() >= 2 and pickup.size() - 1 <= BOT_POWERUP_CHASE_MAX_STEPS:
+		if pickup.size() >= 2 and pickup.size() - 1 <= _bot_profile()["chase_steps"]:
 			path = pickup
 	var targets := {}
 	for e in _alive_enemies():
@@ -1306,6 +1327,7 @@ func _bot_breakable_obstacle(c: Vector2i, turret_cells: Dictionary) -> bool:
 ## there's no reason to eat a hit for a wall that isn't going anywhere.
 func _bot_try_detonate() -> void:
 	if ability_on_cooldown or live_bombs.is_empty():
+		_bot_detonate_since = -1.0
 		return
 	var current_cell := get_current_cell()
 	var targets_enemy := false
@@ -1323,9 +1345,19 @@ func _bot_try_detonate() -> void:
 			elif arena.is_block(c):
 				targets_block = true
 	if not targets_enemy and not targets_block:
+		_bot_detonate_since = -1.0
 		return
 	if self_in_blast and (not targets_enemy or shield_charges <= 0):
+		_bot_detonate_since = -1.0
 		return
+	# The lower levels are slow on the trigger: the target has to have been standing
+	# in the blast for a moment before they press it, and most walk out of it first.
+	var now := Time.get_ticks_msec() / 1000.0
+	if _bot_detonate_since < 0.0:
+		_bot_detonate_since = now
+	if now - _bot_detonate_since < _bot_profile()["detonate_delay"]:
+		return
+	_bot_detonate_since = -1.0
 	use_ability()
 
 ## Engineer walls, bot side. A wall is only worth spending when it costs
@@ -1442,7 +1474,7 @@ func _bot_try_grenade() -> void:
 ## is free: the shell's landing cell is fixed the instant it leaves the tube, so
 ## facing the shot and walking somewhere else next frame costs nothing.
 func _bot_fire_grenade(dir: Vector2i, cells: int) -> void:
-	_bot_grenade_ready_at = Time.get_ticks_msec() / 1000.0 + BOT_GRENADE_GAP
+	_bot_grenade_ready_at = Time.get_ticks_msec() / 1000.0 + BOT_GRENADE_GAP * _bot_profile()["grenade_gap"]
 	facing_dir = dir
 	$Portrait.face(dir)
 	_grenade_throw_range = cells
@@ -2622,12 +2654,13 @@ func _effective_shield_charges() -> int:
 		return mini(shield_charges, _base_shield_charges)
 	return shield_charges
 
-## The Pyro is not hurt by an explosion from one of their own bombs — only inside that
-## bomb's own blast zone, and only their own: a bomb of somebody else's that theirs
-## sets off by chain reaction is still somebody else's. It is the other half of a kit
-## that is all about getting the biggest blast onto the map, which used to carry the
-## price of having to run from every bomb they put down.
-func is_immune_to_own_blast() -> bool:
+## The Pyro is not hurt by the diagonal arms of their own bombs — the straight arms
+## still burn them like anyone, and a bomb of somebody else's that theirs sets off by
+## chain reaction is somebody else's blast in full. It is the other half of a kit that
+## is all about getting the biggest blast onto the map, which used to carry the price of
+## having to run from every bomb they put down; now it only takes the price off the
+## half of the star that is a bonus.
+func is_immune_to_own_diagonals() -> bool:
 	return character_id == CharacterId.PYRO
 
 ## Whether this player is inside a wall (or turret) of their own: only the Engineer's walls

@@ -6,6 +6,18 @@ extends Node
 
 enum Action { MOVE, BOMB, ABILITY, PICKUP, CYCLE, JOIN, PAUSE }
 
+## Behind the built-in font, ahead of whatever the system offers. The PlayStation labels
+## below are symbols (✕ □ ○) that the built-in font either lacks or draws as a speck —
+## the Square came out as a tiny box in the character blurbs — and the system's idea of a
+## fallback differs from machine to machine, the Steam Deck's included.
+const GLYPH_FONT := preload("res://assets/fonts/DejaVuSans.ttf")
+
+func _ready() -> void:
+	var fallbacks := ThemeDB.fallback_font.fallbacks
+	if not fallbacks.has(GLYPH_FONT):
+		fallbacks.append(GLYPH_FONT)
+		ThemeDB.fallback_font.fallbacks = fallbacks
+
 const KEYBOARD_LABELS := {
 	Action.MOVE: "WASD",
 	Action.BOMB: "Space",

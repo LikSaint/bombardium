@@ -3,6 +3,7 @@ extends Node2D
 const PlayerScene := preload("res://scenes/Player.tscn")
 const ArenaScript := preload("res://scripts/Arena.gd")
 const LateJoinScript := preload("res://scripts/LateJoin.gd")
+const FireworksScript := preload("res://scripts/Fireworks.gd")
 const LobbyScenePath := "res://scenes/Lobby.tscn"
 
 @onready var arena: Node2D = $Arena
@@ -466,6 +467,20 @@ func _show_winner(player_id: int) -> void:
 	create_tween().tween_property(winner_portrait, "scale", full, WINNER_POP_DURATION) \
 			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
+## Fireworks behind the results of a finished match — the one thing that tells it from a
+## round's results. Added to the overlay ahead of the text, so the scores stay on top of
+## them; the overlay is hidden and shown again with every result, and a fresh scene (a
+## restart, the lobby) takes them away.
+func _launch_fireworks(winner_id: int) -> void:
+	var fireworks := Node2D.new()
+	fireworks.set_script(FireworksScript)
+	overlay.add_child(fireworks)
+	overlay.move_child(fireworks, 0)
+	var accent := Color.WHITE
+	if winner_id > 0:
+		accent = Consts.PLAYER_COLORS[(winner_id - 1) % Consts.PLAYER_COLORS.size()]
+	fireworks.start(overlay.size, accent)
+
 ## The results block is a fixed pixel stack — a chest-high portrait, the name,
 ## and up to seven score lines — on a window that can be any size, so it gets
 ## the same treatment as the arena: measured, and shrunk as one piece when the
@@ -513,6 +528,7 @@ func _on_round_ended(winner_id: int) -> void:
 		lines.append(Loc.t("MATCH_WINNER", [GameManager.get_match_winner()]))
 		Sfx.play("match_win")
 		_show_winner(GameManager.get_match_winner())
+		_launch_fireworks(GameManager.get_match_winner())
 	elif winner_id == -1:
 		lines.append(Loc.t("ROUND_DRAW", [GameManager.round_number, GameManager.rounds_per_match]))
 		Sfx.play("round_draw")

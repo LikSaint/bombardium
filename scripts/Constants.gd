@@ -140,6 +140,44 @@ func set_configured_player_slots(value: int) -> void:
 func set_configured_bots(value: int) -> void:
 	configured_bots = clampi(value, BOTS_MIN, configured_player_slots)
 
+## How good the bots are, one setting for all of them (the Lobby's Settings screen).
+## Everything a level changes lives in BOT_PROFILES and is read by Player's bot code
+## through bot_profile(); a bot is never given more shield, speed or bombs than anyone
+## else, only better or worse judgement. HARD is what bots were before levels existed.
+enum BotLevel { EASY, MEDIUM, HARD, INSANE }
+const BOT_LEVEL_KEYS := ["BOT_LEVEL_EASY", "BOT_LEVEL_MEDIUM", "BOT_LEVEL_HARD", "BOT_LEVEL_INSANE"]
+## Per level, in BotLevel order:
+##   interval        seconds between decisions — the bot's reaction time to anything not
+##                   already on top of it, a fresh bomb of somebody else's included
+##   careless        chance of putting a bomb down it has worked out it cannot walk away from
+##   margin_scale    scales the spare time it insists on having when it walks away from a bomb
+##   idle            chance that a step is a random one rather than toward a target
+##   chase_steps     how far a detour for a powerup is worth
+##   mine_memory     scales how long it remembers an enemy mine it saw laid
+##   ability         chance per decision that it tries its character's ability at all
+##   grenade_gap     scales the pause between a Grenadier bot's shots
+##   detonate_delay  how long an enemy must stand in a Sapper bot's blast before it fires
+const BOT_PROFILES := [
+	{"interval": 1.1, "careless": 0.12, "margin_scale": 1.0, "idle": 0.4, "chase_steps": 4,
+		"mine_memory": 0.4, "ability": 0.35, "grenade_gap": 1.8, "detonate_delay": 0.5},
+	{"interval": 0.8, "careless": 0.04, "margin_scale": 1.0, "idle": 0.15, "chase_steps": 6,
+		"mine_memory": 0.7, "ability": 0.7, "grenade_gap": 1.25, "detonate_delay": 0.25},
+	{"interval": 0.6, "careless": 0.0, "margin_scale": 1.0, "idle": 0.0, "chase_steps": 8,
+		"mine_memory": 1.0, "ability": 1.0, "grenade_gap": 1.0, "detonate_delay": 0.0},
+	{"interval": 0.3, "careless": 0.0, "margin_scale": 1.0, "idle": 0.0, "chase_steps": 12,
+		"mine_memory": 2.0, "ability": 1.0, "grenade_gap": 0.5, "detonate_delay": 0.0},
+]
+var bot_level: int = BotLevel.HARD
+
+func set_bot_level(value: int) -> void:
+	bot_level = clampi(value, 0, BOT_PROFILES.size() - 1)
+
+func bot_profile() -> Dictionary:
+	return BOT_PROFILES[bot_level]
+
+func bot_level_name(level: int) -> String:
+	return Loc.t(BOT_LEVEL_KEYS[level])
+
 var random_indestructible_walls: bool = false
 
 func set_random_indestructible_walls(value: bool) -> void:
@@ -206,6 +244,13 @@ const DIRECTIONS: Array[Vector2i] = [DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT]
 const DIAGONALS: Array[Vector2i] = [
 	Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(1, 1),
 ]
+
+## What Arena.blast_cells stores for a cell of a blast: BLAST_MAIN for the usual four
+## arms, BLAST_SECONDARY for a cell on one of those diagonal arms. Callers that only ask
+## which cells a blast covers never notice; the ones that care which part of it a cell
+## is in compare. Both are ints on purpose — GDScript will not compare a bool to one.
+const BLAST_MAIN := 1
+const BLAST_SECONDARY := 2
 
 const PLAYER_COLORS := [
 	Color(0.2, 0.6, 1.0),

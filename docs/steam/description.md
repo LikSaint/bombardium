@@ -23,7 +23,7 @@ Bombardium is a fast, colourful pixel-art bomber for up to four players on one s
 Every hero changes how bombs work.
 
 * **Bomb-Master** — the classic. Every bomb is a remote mine: you decide the moment it goes off.
-* **Pyro** — blasts burst in a diamond and punch through crates, and Pyro is immune to their own explosions.
+* **Pyro** — blasts fan out along the diagonals as well, and the diagonal arms of their own bombs can't hurt them.
 * **Bomb-Kicker** — builds up speed skating down a straight line, kicks bombs across the arena, and can dig in behind a shield.
 * **Parkour Runner** — fast, and double-tap a direction to jump over crates, bombs and even stone walls. Nothing can hurt you in the air.
 * **Engineer** — builds temporary walls and bridges, and upgrades walls into mini-turrets that shell your opponents.

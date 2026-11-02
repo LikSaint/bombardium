@@ -30,24 +30,6 @@ const RANDOM_WALL_DENSITY := 0.22
 # placing player's color so it reads as "theirs" without a dedicated asset.
 const TEMP_WALL_OWNER_TINT_STRENGTH := 0.35
 
-## What it costs the Pyro's blast to punch through something, on top of the step
-## onto the cell itself. Nothing is proof against it and nothing is free: cover
-## buys range off the fire rather than stopping it dead, and how much it buys is
-## the whole difference between the two kinds of cover.
-##
-## A crate is a delay — at 1 the piercing first shows at radius 3 and grows a
-## cell at a time from there, so a crate wall is worth ducking behind early and
-## stops being worth much later, which is the "punches through crates a bit" the
-## character's description promises.
-##
-## Stone is a wall in every sense but absolute — at 3 nothing gets through one
-## below radius 5, and even a maxed Pyro only gets a cell or two out the far
-## side. That is the number to move if permanent cover feels wrong: 4 makes
-## stone very nearly the hard stop it used to be, 2 makes it barely thicker than
-## a crate.
-const CRATE_PIERCE_COST := 1
-const WALL_PIERCE_COST := 3
-
 var cells: Dictionary = {} # Vector2i -> CellState
 var blocks_by_cell: Dictionary = {} # Vector2i -> Block node
 var bombs_by_cell: Dictionary = {} # Vector2i -> Bomb node
@@ -770,23 +752,29 @@ func blast_cells(origin: Vector2i, radius: int, is_star: bool, capped_dir: Vecto
 ## Four arms, each ending at the first solid thing. A temp wall is reached and
 ## burns; permanent stone is not reached at all. Either way the arm stops there.
 func _cross_blast_cells(origin: Vector2i, radius: int, capped_dir: Vector2i = Vector2i.ZERO, capped_radius: int = 0) -> Dictionary:
-	var hit := {origin: true}
+	var hit := {origin: Consts.BLAST_MAIN}
 	for dir in Consts.DIRECTIONS:
 		var reach := radius
 		if dir == capped_dir:
 			reach = mini(radius, capped_radius)
-		for i in range(1, reach + 1):
-			var c: Vector2i = origin + dir * i
-			if not in_bounds(c):
-				break
-			if is_wall(c):
-				if is_temp_wall(c):
-					hit[c] = true
-				break
-			hit[c] = true
-			if is_block(c):
-				break
+		_blast_arm(hit, origin, dir, reach, Consts.BLAST_MAIN)
 	return hit
+
+## One arm of a blast, in any of the eight directions: it stops at the first solid
+## thing, a crate or a temp wall being reached and stone not. `kind` is what the
+## cells it reaches are stored as (see Consts.BLAST_SECONDARY).
+func _blast_arm(hit: Dictionary, origin: Vector2i, dir: Vector2i, reach: int, kind) -> void:
+	for i in range(1, reach + 1):
+		var c: Vector2i = origin + dir * i
+		if not in_bounds(c):
+			return
+		if is_wall(c):
+			if is_temp_wall(c):
+				hit[c] = kind
+			return
+		hit[c] = kind
+		if is_block(c):
+			return
 
 ## The Pyro's blast: an eight-pointed star, not a filled diamond.
 ##
@@ -797,6 +785,11 @@ func _cross_blast_cells(origin: Vector2i, radius: int, capped_dir: Vector2i = Ve
 ## footprint grows as 6r+1 against a normal bomb's 4r+1: half again as much
 ## blast, at every radius, forever.
 ##
+## The diagonal cells are stored as Consts.BLAST_SECONDARY rather than true: they
+## are the part of the blast the Pyro is not hurt by when it is their own bomb (see
+## Player.is_immune_to_own_diagonals), and the part that is drawn paler. The
+## straight arms hurt everyone, the Pyro included.
+##
 ## It used to be a filled diamond, 2r²+2r+1 cells. That is quadratic against
 ## everyone else's linear, so the third radius powerup was worth four times what
 ## the first one was and a mid-round Pyro covered a third of a large map from one
@@ -806,42 +799,10 @@ func _cross_blast_cells(origin: Vector2i, radius: int, capped_dir: Vector2i = Ve
 ## every Pyro at the start of a round — would be an ordinary bomb with no star at
 ## all.
 func _star_blast_cells(origin: Vector2i, radius: int) -> Dictionary:
-	var hit := {origin: true}
-	for dir in Consts.DIRECTIONS:
-		_pierce_ray(hit, origin, dir, radius)
+	var hit := _cross_blast_cells(origin, radius)
 	for dir in Consts.DIAGONALS:
-		_pierce_ray(hit, origin, dir, (radius + 1) / 2)
+		_blast_arm(hit, origin, dir, (radius + 1) / 2, Consts.BLAST_SECONDARY)
 	return hit
-
-## One arm of a Pyro blast. Unlike an ordinary arm it isn't stopped by what it
-## hits, it is *slowed* by it: cover charges the fire extra range to get through
-## (CRATE_PIERCE_COST, WALL_PIERCE_COST) and the arm runs until it can't pay.
-## Crates are a speed bump, stone very nearly a wall, and neither is a guarantee
-## — which is the piercing the character is built on, minus the version of it
-## that ignored walls outright.
-func _pierce_ray(hit: Dictionary, origin: Vector2i, dir: Vector2i, range_cells: int) -> void:
-	var left := range_cells
-	var c := origin
-	while left > 0:
-		c += dir
-		if not in_bounds(c):
-			return
-		left -= 1 # the step onto this cell
-		if is_wall(c):
-			left -= WALL_PIERCE_COST
-			# A temp wall burns the moment the fire reaches its face, whether or
-			# not anything gets out the far side — it is the Engineer's cover and
-			# it is spent either way. Permanent stone lights up only when the
-			# blast actually came through, so a dark wall always means the cover
-			# held, and nothing on screen ever suggests stone is breaking.
-			if is_temp_wall(c) or left > 0:
-				hit[c] = true
-			if left < 0:
-				return
-		else:
-			hit[c] = true
-			if is_block(c):
-				left -= CRATE_PIERCE_COST
 
 func is_walkable(cell: Vector2i) -> bool:
 	if get_cell_state(cell) != CellState.EMPTY:

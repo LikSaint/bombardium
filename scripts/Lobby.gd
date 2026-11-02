@@ -22,8 +22,8 @@ const BAR_SELECTED_COLOR := Color(1.0, 0.65, 0.2, 1)
 
 const COUNTDOWN_SECONDS := 3
 
-enum SettingsRow { ROOM, MAP_SIZE, MAP_LAYOUT, PLAYER_SLOTS, BOTS, RANDOM_WALLS, POWERUP_CHANCE, HAZARD_CHANCE, SUDDEN_DEATH, ROUNDS }
-const SETTINGS_ROW_COUNT := 10
+enum SettingsRow { ROOM, MAP_SIZE, MAP_LAYOUT, PLAYER_SLOTS, BOTS, BOT_LEVEL, RANDOM_WALLS, POWERUP_CHANCE, HAZARD_CHANCE, SUDDEN_DEATH, ROUNDS }
+const SETTINGS_ROW_COUNT := 11
 
 var view: String = "settings" # "settings" or "room"
 var settings_selected: int = SettingsRow.ROOM
@@ -47,7 +47,7 @@ var countdown_active: bool = false
 @onready var settings_row_nodes: Array = [
 	$SettingsPanel/Rows/RoomRow, $SettingsPanel/Rows/MapSizeRow, $SettingsPanel/Rows/MapLayoutRow,
 	$SettingsPanel/Rows/PlayerSlotsRow,
-	$SettingsPanel/Rows/BotsRow, $SettingsPanel/Rows/RandomWallsRow,
+	$SettingsPanel/Rows/BotsRow, $SettingsPanel/Rows/BotLevelRow, $SettingsPanel/Rows/RandomWallsRow,
 	$SettingsPanel/Rows/PowerupChanceRow, $SettingsPanel/Rows/HazardChanceRow,
 	$SettingsPanel/Rows/SuddenDeathRow, $SettingsPanel/Rows/RoundsRow,
 ]
@@ -93,6 +93,8 @@ func _refresh_settings_texts() -> void:
 	$SettingsPanel/Rows/PlayerSlotsRow/Value.text = str(Consts.configured_player_slots)
 	$SettingsPanel/Rows/BotsRow/Label.text = Loc.t("SETTINGS_BOTS")
 	$SettingsPanel/Rows/BotsRow/Value.text = str(Consts.configured_bots)
+	$SettingsPanel/Rows/BotLevelRow/Label.text = Loc.t("SETTINGS_BOT_LEVEL")
+	$SettingsPanel/Rows/BotLevelRow/Value.text = Consts.bot_level_name(Consts.bot_level)
 	$SettingsPanel/Rows/RandomWallsRow/Label.text = Loc.t("SETTINGS_RANDOM_WALLS")
 	$SettingsPanel/Rows/RandomWallsRow/Value.text = Loc.t("SETTINGS_ON") if Consts.random_indestructible_walls else Loc.t("SETTINGS_OFF")
 	$SettingsPanel/Rows/PowerupChanceRow/Label.text = Loc.t("SETTINGS_POWERUP_CHANCE")
@@ -153,6 +155,8 @@ func _adjust_setting(delta: int) -> void:
 		SettingsRow.BOTS:
 			Consts.set_configured_bots(Consts.configured_bots + delta)
 			settings_touched = true
+		SettingsRow.BOT_LEVEL:
+			Consts.set_bot_level(Consts.bot_level + delta)
 		SettingsRow.RANDOM_WALLS:
 			Consts.set_random_indestructible_walls(not Consts.random_indestructible_walls)
 		SettingsRow.POWERUP_CHANCE:

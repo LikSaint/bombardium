@@ -11,7 +11,7 @@ extends Node2D
 ## than a clock to play against — it exists so a minefield eventually expires and
 ## so careless planting costs the Sapper something too, not so anyone waits it
 ## out. They carry a blinking antenna instead of a burning fuse; the blink speeds
-## up as the fuse runs down.
+## up, brightens and swells as the fuse runs down.
 ##
 ## The Magnet's bombs are `magnetic`: they crawl a cell at a time toward
 ## whichever living opponent is nearest, on a normal fuse. That makes them the
@@ -156,7 +156,7 @@ static func flight_time_for(cells: int) -> float:
 signal exploded
 
 @export var radius: int = 2
-@export var is_star_blast: bool = false # Pyro passive: four extra half-length arms on the diagonals, and cover slows the blast instead of stopping it
+@export var is_star_blast: bool = false # Pyro passive: four extra half-length arms on the diagonals, which the Pyro's own bombs don't hurt them with
 @export var remote: bool = false # Sapper passive: no fuse, detonated only on demand
 @export var magnetic: bool = false # Magnet passive: crawls toward the nearest opponent
 @export var is_mine: bool = false # Miner ability: walkable, no fuse, tripped by opponents
@@ -189,6 +189,8 @@ var _flight_from: Vector2 # the muzzle it left; `cell` is where it comes down
 const FUSE_BASE := Vector2(8, -6)
 const FUSE_TIP_FULL := Vector2(20, -20)
 const ANTENNA_BLINK_PERIOD := 0.8 # seconds per full on/off cycle
+const ANTENNA_DIM_ALPHA := 0.3 # how faint the dot is between flashes on a fresh fuse; it goes to 0 as the fuse runs out
+const ANTENNA_PEAK_SCALE := 1.8 # how much bigger the dot is at the instant of a flash on the last tick
 
 func _ready() -> void:
 	# A shell in the air is deliberately not on the grid: it doesn't block the
@@ -204,6 +206,7 @@ func _ready() -> void:
 	$Spark.visible = not remote and not is_mine and not thrown
 	$Antenna.visible = remote
 	$AntennaTip.visible = remote
+	$AntennaGlow.visible = remote
 	if thrown:
 		# Lets Player._incoming_shell_cells find every shell in flight by
 		# scanning one group instead of walking each player's live_bombs — the
@@ -266,17 +269,23 @@ func _update_fuse_cue() -> void:
 	$Spark.position = tip
 	$Spark.scale = Vector2.ONE * pulse
 
-## A remote bomb's "still armed" cue: a plain on/off blink that starts lazy and
-## winds up as the long fuse burns down. Deliberately still not the burning-fuse
-## cue — the body neither pulses nor reddens, because the honest reading of a
-## mine is "sitting there, on its own schedule", not "about to go off any
-## second" the way a thrown bomb is. The rate carries all of it: at a full fuse
-## this is the same unhurried blink it always was, and only the last seconds get
-## frantic.
+## A remote bomb's "still armed" cue: a red dot on the antenna that blinks, and
+## blinks harder the nearer the long fuse is to setting the bomb off by itself.
+## Deliberately still not the burning-fuse cue — the body neither pulses nor
+## reddens, because the honest reading of a mine is "sitting there, on its own
+## schedule", not "about to go off any second" the way a thrown bomb is. Everything
+## the dot has to say is in the dot: at a full fuse it is the same unhurried blink,
+## and as the fuse runs out it blinks faster, swells, throws a glow and goes fully
+## dark between flashes, so the last seconds are frantic and impossible to miss.
 func _update_antenna_blink() -> void:
-	var freq: float = lerp(1.0 / ANTENNA_BLINK_PERIOD, 9.0, 1.0 - _fuse_ratio())
-	var phase := fmod(Time.get_ticks_msec() / 1000.0 * freq, 1.0)
-	$AntennaTip.modulate.a = 1.0 if phase < 0.5 else 0.15
+	var urgency: float = 1.0 - _fuse_ratio()
+	var freq: float = lerp(1.0 / ANTENNA_BLINK_PERIOD, 9.0, urgency)
+	var lit := fmod(Time.get_ticks_msec() / 1000.0 * freq, 1.0) < 0.5
+	var dim: float = lerp(ANTENNA_DIM_ALPHA, 0.0, urgency)
+	$AntennaTip.modulate.a = 1.0 if lit else dim
+	$AntennaTip.scale = Vector2.ONE * (lerp(1.0, ANTENNA_PEAK_SCALE, urgency) if lit else 1.0)
+	$AntennaGlow.modulate.a = urgency if lit else 0.0
+	$AntennaGlow.scale = Vector2.ONE * lerp(0.6, 1.4, urgency)
 
 ## A mine's whole life: arm, wait however long it takes, trip, go off.
 ##
@@ -414,7 +423,7 @@ func _apply_blast() -> void:
 	Log.info("BOMB", "exploded at %s radius=%d cells=%d%s owner=%s" % [
 		Log.cell(cell), radius, cells.size(), " mine" if is_mine else (" shell" if thrown else ""), Log.who_node(owner_player)])
 	for c in cells:
-		_spawn_explosion(c)
+		_spawn_explosion(c, cells[c] == Consts.BLAST_SECONDARY)
 		if arena.is_temp_wall(c):
 			arena.hit_temp_wall_at(c, owner_player)
 		elif arena.is_block(c):
@@ -439,11 +448,12 @@ func _trigger_chain_at(target_cell: Vector2i) -> void:
 ## the one place a bridge has to be checked: a crossing goes down to a cross, a
 ## Pyro's star and a chain reaction alike, without any of them having to know
 ## bridges exist.
-func _spawn_explosion(target_cell: Vector2i) -> void:
+func _spawn_explosion(target_cell: Vector2i, secondary: bool = false) -> void:
 	arena.break_bridge_at(target_cell)
 	var exp := ExplosionScene.instantiate()
 	exp.position = arena.cell_to_world(target_cell)
 	exp.owner_player = owner_player
+	exp.secondary = secondary
 	arena.add_child(exp)
 
 ## A kick carries the bomb `distance` cells, or until something stops it — the

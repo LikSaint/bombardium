@@ -32,6 +32,16 @@ and other state as plain text, since icons alone weren't discoverable enough:
   corners — carries a small pictogram of what drives it: robot, gamepad or keyboard (`DeviceBadge`).
   Bots play with the same character/rules as anyone else, just slower to react than a human would be
   (see Architecture notes).
+- **Bot level**: the Bot level row picks how good all the bots are — **Easy / Medium / Hard / Insane**
+  (Лёгкие / Средние / Сильные / Сверхсильные), Hard being what bots were before levels existed. A level
+  is a row of `Consts.BOT_PROFILES` and changes judgement only, never stats: how often a bot decides
+  (`interval` 1.1 / 0.8 / 0.6 / 0.3s — also its reaction time to somebody else's bomb), how often it
+  plants a bomb it can't get clear of (`careless`), how much spare time it wants when it runs
+  (`margin_scale`), how often it wanders at random (`idle`), how far a powerup is worth a detour
+  (`chase_steps`), how long it remembers an enemy mine (`mine_memory`), how often it bothers with its
+  character's ability (`ability`), how fast the Grenadier follows up (`grenade_gap`) and how long the
+  Sapper waits before pressing the trigger (`detonate_delay`). Read through `Player._bot_profile()`;
+  `Player.bot_level_override` puts one bot on a different level than the lobby's, for tests.
 - A hotkey legend for all of the above sits fixed at the bottom of the Lobby screen.
 - Match starts automatically once at least one device has joined and everyone is ready. Starting
   solo (exactly 1 slot, no one else) auto-fills a bot into the 2nd slot — a lone player can never
@@ -116,7 +126,10 @@ In-match:
   gated behind an actual choice; Lobby is `GameManager.leave_to_lobby()` (the same transition the
   pause menu's own exit option uses); Quit exits outright. A match with nobody there to press a
   button — every slot a bot, or every pad gone — has no menu to get stuck on: it falls back to the
-  old timed countdown, just landing on the Lobby now instead of quietly restarting.
+  old timed countdown, just landing on the Lobby now instead of quietly restarting. A finished match
+  also gets **fireworks** (`Fireworks.gd`, launched from `Main._launch_fireworks`) behind the results
+  — rockets from the bottom edge bursting in the winner's colour and others — which is what tells it
+  apart from a round's results, whose heading was the only difference before.
 - The **pause menu** shows the running score in the corner for as long as it's open
   (`PauseMenu._refresh_score`) — pausing mid-match is exactly when someone wants to check it, and the
   alternative (catching it during the few-second between-round overlay) is gone before most people
@@ -141,7 +154,7 @@ In-match:
 | Bomb-Master (Сапёр) | +1 bomb, +1 shield, from the start | **No fuse at all** — every bomb you place is a remote mine (blinking antenna, no ticking Timer) that only goes off when you press this |
 | Parkour Runner (Паркурщик) | +25% move speed, +1 shield | Double-tap a direction to hop over a crate, a bomb, **or an indestructible wall** (no button). **Nothing can hurt them in the air** — no damage, no shield spent — nor for 0.1s after landing (`Player._airborne`, `JUMP_LANDING_GRACE`); the portrait arcs up so it reads as a jump |
 | Engineer | +1 bomb, +1 shield | **Build** on the cell in front of you (hold to reinforce): a **wall** — three levels, passable for you only, **lasts 1 minute**, **one wall per bomb you have** — or a **bridge** over water. Aim the same button at a level-3 wall of yours and **hold it for 3s** to make it a **mini-turret**. See below |
-| Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs, and **is not hurt by an explosion from their own bombs** (`Player.is_immune_to_own_blast`) — only inside that bomb's blast, and only their own: a chain reaction into somebody else's bomb still kills | Every bomb explodes in a diamond and punches through crates |
+| Pyro | +1 shield, +50% powerup drop chance, walks through their own bombs, and **is not hurt by the diagonal arms of their own bombs** (`Player.is_immune_to_own_diagonals`) — the straight arms burn them like anyone, and a chain reaction into somebody else's bomb still kills | Every bomb adds four half-length arms on the diagonals (`Arena._star_blast_cells`), drawn paler (`Explosion.SECONDARY_TINT`). Arms stop at crates and walls like any other; nothing is pierced |
 | Bomb-Kicker (Хокеист) | +10% move speed, +1 shield, skating: unbroken straight-line running charges speed up to 1.6x over 0.8s, and kicking: walking into a bomb sends it **2 cells** (+1 per speed powerup, `Player.kick_distance`), or until it hits an obstacle; it can still explode mid-slide | **Dig in**: sit down in a defensive stance — the character crouches and a shield appears on them. While dug in they can't walk, kick or place bombs; the next hit that would have hurt them — a blast, a saw, fire — does nothing (no damage, no shield spent, no red flash) and just throws them out of the stance: they stand up and the shield swells and fades, with a second of invulnerability that isn't drawn. Pressing the button again leaves it too. Either way the ability is on a **2s cooldown** (`Player.DEFENSE_COOLDOWN`), shown as the red dial behind the character, like the Grenadier's |
 | Magnetto (Магнетто) | +1 bomb, +1 shield | None — their bombs crawl a cell at a time toward whichever opponent is nearest, waking only inside 8 cells and lunging on the last two. **Every speed powerup the Magnet picks up speeds the crawl by the same tenth it speeds them** (`Bomb._magnet_speed_factor`; the factor is read on every step, so bombs already out pick it up) |
 | Miner (Минёр) | +1 bomb, +1 shield | Spend **two** charges to plant an invisible mine: no fuse, walkable, and set off by any opponent stepping anywhere its blast reaches — the full radius of an ordinary bomb of yours — and once tripped it counts down for 0.3s, beeping and blinking faster and faster — **if nobody it could hurt is still inside its reach when the countdown ends, it does not go off** (a lower beep says it stood down) and goes back to waiting where it was, so clipping the edge of a mine and turning straight back is safe, while staying put or walking on through is not (`Bomb._update_mine`, `MINE_TRIP_DELAY`). An ordinary bomb **can be placed on top of a mine** (so a Miner boxed in by their own field can still blast out) — the mine then goes off together with that bomb |
@@ -300,8 +313,8 @@ and the shot is refused outright in any case where the arena says it would.
 A shell costs a bomb charge and hands it back when it goes off, which keeps it inside the same
 accounting as everyone else's ordnance. The **cooldown** is what turns collecting them into a
 progression: it is a table (`Player.GRENADE_COOLDOWNS`) indexed by how many shells beyond the two the
-launcher starts with have been collected, counted from the throw — **1.6s** at the starting kit,
-**1.0s** with one extra, **0.6s** with two, then 0.4s, 0.25s and a floor of **0.15s**. A starting
+launcher starts with have been collected, counted from the throw — **0.8s** at the starting kit,
+**0.5s** with one extra, **0.3s** with two, then 0.2s, 0.125s and a floor of **0.075s** (all half of what they were). A starting
 Grenadier lobs one shell and waits for it; one with a handful can put several in the air at nearly
 the pace they can press the button. (It was a flat 0.3s, before that none at all, before that the
 flight plus 1.2s — the long ones got in the way of the one thing the character is for, which is
@@ -633,8 +646,8 @@ explodes when caught in someone else's blast, is designed but not built — see
   bomb already on the cell, a crate in the way) say nothing.
 - Bots are a `player_slots` entry with `device = Consts.DEVICE_BOT`, added from the Lobby (B key) —
   no separate bot scene/node type. In `Player.gd`, `is_bot` (set from `device_id` in `_ready`)
-  swaps `_poll_move_dir()`/`_input()` for `_bot_think()`, run on a `BOT_DECISION_INTERVAL` timer
-  (0.6s ± jitter, tuned down from an initial 0.2s that made bots feel too sharp/twitchy — a bot only
+  swaps `_poll_move_dir()`/`_input()` for `_bot_think()`, run on a timer (the bot level's `interval`, see `Consts.BOT_PROFILES`;
+  0.6s ± jitter at Hard, tuned down from an initial 0.2s that made bots feel too sharp/twitchy — a bot only
   attempts one grid step per decision and stands still in between, it doesn't keep running in the
   last-chosen direction for the whole interval): compute every live bomb's blast cells, flee via BFS
   if standing in one, otherwise BFS toward the nearest block/enemy and drop a bomb only if a safe
@@ -701,8 +714,6 @@ explodes when caught in someone else's blast, is designed but not built — see
 
 ## Known simplifications / not yet done
 
-- Pyro's circle blast doesn't respect line-of-sight occlusion (a block inside the radius doesn't
-  shield cells behind it, unlike the cross blast).
 - Mine / remote bomb / fire bomb weapon pickups from the brief aren't built.
 - Team color tinting is whole-sprite (see Art pipeline) — not as clean as a clothes-only tint would
   be, but PixelLab doesn't hand back separable layers.
